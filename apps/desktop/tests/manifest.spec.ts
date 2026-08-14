@@ -16,12 +16,19 @@ import { parseBootManifest } from '@deepseek-ai/dsh-client-modules/client'
 import { buildBootManifest, clientBundlePathOf, discoverClientPlugins } from '../src/main/manifest.ts'
 
 // Alphabetical: the manifest scan sorts bundle paths, so fixture assertions
-// compare against the same order.
+// compare against the same order. connection carries a prefetch mark and an
+// inject edge (like the real dsh.client declarations); modules has neither
+// (its real declaration is immediately: true, but the fixture keeps one row
+// plain so the optional-field shape is pinned both ways).
 const FIXTURE_PACKAGES = ['@deepseek-ai/dsh-client-connection', '@deepseek-ai/dsh-client-modules']
+const FIXTURE_ROSTER = [
+  { id: '@deepseek-ai/dsh-client-connection', immediately: true, inject: ['@deepseek-ai/dsh-api-remotes'] },
+  { id: '@deepseek-ai/dsh-client-modules', inject: [] },
+]
 
 const roots: string[] = []
 
-/** A bundle root fixture: one client.js per package, scoped names nested like dist/bundles. */
+/** A bundle root fixture: one client.js per package plus the roster, scoped names nested like dist/bundles. */
 function fixtureBundleRoot(): string {
   const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-bundles-'))
   roots.push(root)
@@ -30,6 +37,7 @@ function fixtureBundleRoot(): string {
     mkdirSync(dirname(target), { recursive: true })
     writeFileSync(target, `window.__ModuleLoader__.load(${JSON.stringify(name)}, () => {})\n`)
   }
+  writeFileSync(join(root, 'roster.json'), `${JSON.stringify(FIXTURE_ROSTER)}\n`)
   return root
 }
 
@@ -58,6 +66,36 @@ describe('desktop boot manifest', () => {
       expect(new URL(row.url, 'http://dsh.internal').pathname).toBe(`/plugins/${row.id}/client.js`)
       expect(clientBundlePathOf(row.id, root)).toBe(join(root, row.id, 'client.js'))
     }
+  })
+
+  it('carries the roster immediately marks and inject edges like the webserver graph', () => {
+    const root = fixtureBundleRoot()
+    const manifest = buildBootManifest(root)
+    const connection = manifest.entries.find(row => row.id === '@deepseek-ai/dsh-client-connection')
+    expect(connection).toBeDefined()
+    expect(connection!.immediately).toBe(true)
+    expect(connection!.inject).toEqual(['@deepseek-ai/dsh-api-remotes'])
+    const modules = manifest.entries.find(row => row.id === '@deepseek-ai/dsh-client-modules')
+    expect(modules).toBeDefined()
+    // inject is informational and always present (possibly empty); the
+    // prefetch mark only when the declaration sets it.
+    expect(modules!.inject).toEqual([])
+    expect(modules!.immediately).toBeUndefined()
+    // The renderer's stage-one prefetch tier keys on the mark (the plugins
+    // view, per the shell boot kernel): every immediately row must appear
+    // there.
+    const parsed = parseBootManifest(manifest)
+    const prefetchIds = parsed.plugins.filter(row => row.immediately).map(row => row.id)
+    expect(prefetchIds).toEqual(['@deepseek-ai/dsh-client-connection'])
+  })
+
+  it('fails loud when bundles exist but the roster is missing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'dsh-desktop-bundles-'))
+    roots.push(root)
+    const target = join(root, '@deepseek-ai/dsh-client-connection', 'client.js')
+    mkdirSync(dirname(target), { recursive: true })
+    writeFileSync(target, 'window.__ModuleLoader__.load("x", () => {})\n')
+    expect(() => buildBootManifest(root)).toThrow(/roster\.json/)
   })
 
   it('scans a packaged-style root (nested scoped dirs, explicit root injection)', () => {

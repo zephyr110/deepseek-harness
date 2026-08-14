@@ -1,19 +1,22 @@
 /**
  * Desktop boot manifest: the client roster the renderer boots against — the
  * same wire graph the webserver injects as window.__DSH_BOOT__ (WebBootGraph),
- * built from the collected web client bundles (no HTTP involved). Rows are
- * limited to id/url/rev like the brief's scan: no inject edges (informational
- * in the web graph) and no immediately prefetch marks (the desktop boots
- * bundle loads through entry creation instead of a stage-one tier).
+ * built from the collected web client bundles (no HTTP involved). Rows carry
+ * the dsh.client metadata the webserver graph carries: `immediately` prefetch
+ * marks (the stage-one tier that pre-registers every factory before entry
+ * creation — without it a bundle's synchronous require of a peer client half,
+ * e.g. locale requiring @deepseek-ai/dsh-client-runtime/client, hits an
+ * unregistered factory) and `inject` edges (informational in the graph).
  *
  * The scan targets a bundle root, not the workspace: collect-bundles.mjs
  * freezes one <package>/client.js per web client plugin under
- * apps/desktop/dist/bundles, which is what electron-builder packs into the
- * asar — inside the archive no URL can normalize back to the repository root,
- * so scanning the workspace package tree there would come back empty. Callers pass an
- * explicit root (the main entry injects app.getAppPath()/dist/bundles when
- * packaged, apps/desktop/dist/bundles in dev); the default serves tests and
- * direct callers.
+ * apps/desktop/dist/bundles plus a roster.json carrying the metadata, which is
+ * what electron-builder packs into the asar — inside the archive no URL can
+ * normalize back to the repository root, so scanning the workspace package
+ * tree there would come back empty. Callers pass an explicit root (the main
+ * entry injects app.getAppPath()/dist/bundles when packaged,
+ * apps/desktop/dist/bundles in dev); the default serves tests and direct
+ * callers.
  */
 import { readFileSync, globSync } from 'node:fs'
 import { join } from 'node:path'
@@ -22,6 +25,26 @@ import { createHash } from 'node:crypto'
 import type { WebBootEntry, WebBootGraph } from '@deepseek-ai/dsh-client-modules/client'
 
 const defaultBundleRoot = fileURLToPath(new URL('../../dist/bundles', import.meta.url))
+
+/** One roster row as collect-bundles.mjs writes it (subset of dsh.client). */
+interface RosterRow {
+  id: string
+  immediately?: boolean
+  inject?: string[]
+}
+
+/** Read the collected-roster metadata, failing loud when bundles exist but the roster does not. */
+function readRoster(root: string): Map<string, RosterRow> {
+  const rosterPath = join(root, 'roster.json')
+  try {
+    const rows = JSON.parse(readFileSync(rosterPath, 'utf8')) as RosterRow[]
+    if (!Array.isArray(rows)) throw new Error(`roster.json at ${root} is not an array`)
+    return new Map(rows.map(row => [row.id, row]))
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error)
+    throw new Error(`dsh-desktop: cannot read bundle roster ${rosterPath}: ${detail}`, { cause: error })
+  }
+}
 
 /** sha1 content hash shortened to 12 hex chars (bundle rev / graph rev), same shortening the webserver graph uses. */
 function shortHash(input: string): string {
@@ -65,15 +88,29 @@ export function discoverClientPlugins(root = defaultBundleRoot): string[] {
 /**
  * Build the desktop boot graph: one wire entry per collected client bundle,
  * urls shaped `/plugins/<id>/client.js?rev=<rev>` exactly like the webserver
- * graph.
+ * graph, with the roster's immediately/inject metadata on each row.
  * @param root - bundle root holding the collected web client bundles.
  * @returns the wire graph the renderer boots against.
  */
 export function buildBootManifest(root = defaultBundleRoot): WebBootGraph {
+  const discovered = discoverClientBundleDirs(root)
+  const roster = discovered.length > 0 ? readRoster(root) : new Map<string, RosterRow>()
   const entries: WebBootEntry[] = []
-  for (const { name } of discoverClientBundleDirs(root)) {
+  for (const { name } of discovered) {
     const rev = shortHash(readBundle(join(root, name, 'client.js')))
-    entries.push({ id: name, url: `/plugins/${name}/client.js?rev=${rev}`, rev })
+    const row = roster.get(name)
+    if (row === undefined) {
+      throw new Error(`dsh-desktop: collected bundle "${name}" missing from roster.json under ${root}`)
+    }
+    // Same optional-field shape the webserver graph carries (graphRow):
+    // inject always (informational, possibly empty), immediately only when true.
+    entries.push({
+      id: name,
+      url: `/plugins/${name}/client.js?rev=${rev}`,
+      rev,
+      inject: row.inject ?? [],
+      ...(row.immediately === true ? { immediately: true } : {}),
+    })
   }
   return { rev: shortHash(JSON.stringify(entries)), entries }
 }
