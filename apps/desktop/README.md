@@ -11,14 +11,14 @@ Three processes plus one Electron-free bridge core (`src/ipc/`):
 | Process | Files | Responsibility |
 |---|---|---|
 | Main | `src/main/index.ts`, `host.ts`, `ipc-bridge.ts`, `manifest.ts` | Boots the host with `dsh-app-boot.boot()` (no webserver), registers the `dsh:fetch` / `dsh:stream` / `dsh:load-bundle` / `dsh:boot-manifest` channels, opens the window |
-| Preload | `src/preload/index.ts` | The `window.dsh` contextBridge surface — `fetchRequest`, `onStream`, `loadBundle`, `bootManifest`; no raw IPC exposure |
+| Preload | `src/preload/index.ts` | The `window.dsh` contextBridge surface — `fetchRequest`, `onStream`, `loadBundle`, `bootManifest`, `booted` (smoke signal); no raw IPC exposure |
 | Renderer | `src/renderer/main.tsx`, `transport.ts` | The shared `AppWebEntry` shell over the desktop IPC transport |
 
 Persistence lives under the OS user-data directory: the Electron entry sets `DSH_HOME` to `userData/dsh` before the host boots. Plugin client bundles and the boot manifest (`{ rev, entries }`) ride the same IPC channels instead of the webserver's HTTP injection.
 
 ## Development
 
-Built artifacts come first. From the repository root, `pnpm run build:lib` builds the host and client libraries — including the client bundles the desktop boot manifest scans — then build the app itself:
+Built artifacts come first. From the repository root, `pnpm run build:lib` builds the host and client libraries — including the client bundles, which the app's build then collects into `dist/bundles` (the roster the boot manifest scans) — then build the app itself:
 
 ```sh
 pnpm run build:lib
@@ -38,7 +38,7 @@ pnpm --filter @deepseek-ai/dsh-desktop run dist       # installers
 pnpm --filter @deepseek-ai/dsh-desktop run dist:dir   # unpacked app only
 ```
 
-Smoke test: the packaged app accepts `--smoke-test` — it boots the host, opens a window, prints `dsh-desktop smoke OK`, and exits 0. CI runs it after packaging on each matrix target.
+Smoke test: the packaged app accepts `--smoke-test` — it boots the host, opens a window, prints `dsh-desktop smoke OK (N entries)`, and exits 0 only after the renderer reports it booted (the `dsh:booted` signal, 30s timeout otherwise). CI runs it after packaging on each matrix target; a white or dead renderer fails the lane instead of passing on `did-finish-load`.
 
 ## Known Limitations and Deferred Work
 

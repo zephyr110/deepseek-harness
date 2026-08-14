@@ -71,19 +71,19 @@ apps/desktop
 
 - appId：`ai.deepseek.dsh`；productName：`DeepSeek Harness`。
 - 目标：`mac: { target: [dmg, zip], identity: null }`、`win: { target: nsis }`（x64）。
-- Files：构建后的宿主 `lib/` 闭包、渲染进程 `dist/`、插件客户端 bundle（每个客户端插件一个 `lib/client.js`）、electron-builder 配置、资源（图标）。其余全是 dev。
-- 图标：`apps/desktop/build/` 下的一套简单生成图标（icon.icns / icon.ico）；v1 无品牌美术素材。
+- Files：构建后的宿主 `lib/` 闭包、渲染进程 `dist/`、收集的插件客户端 bundle（`dist/bundles/<package>/client.js`——应用构建期间由 `scripts/collect-bundles.mjs` 从每个 web 客户端插件构建出的 `lib/client.js` 拷贝）、electron-builder 配置、资源（图标）。其余全是 dev。
+- 图标：`scripts/generate-icon.mjs` 用 sharp 把官方 favicon 的深色变体（圆角 `#1F2430` 方块上的白色鱼）渲染为 `build/icon.png`；electron-builder 从中派生 icns/ico。v1 无品牌美术素材。
 
 ## GitHub Actions 工作流
 
 `.github/workflows/desktop-release.yml`，参照仓库现有 CI 模式（`build-exe-for-python-sdk.yml`）：
 
 - 触发器：`workflow_dispatch`（手动）和推送 `desktop-v*` 标签（发布一个 GitHub Release，安装程序作为资产）。
-- 矩阵：`macos-latest`（arm64）、`macos-13`（x64）、`windows-latest`（x64）。
-- 步骤：`actions/checkout@v6` → `pnpm/action-setup` → `actions/setup-node@v6`（node 24，pnpm 缓存）→ `pnpm install --frozen-lockfile` → 构建（`build:lib` + `build:web` + 桌面渲染进程）→ `pnpm --filter @deepseek-ai/dsh-desktop exec electron-builder --mac|--win` → 上传产物；推送标签时附加到 release。
+- 矩阵：`macos-latest`（arm64）和 `windows-latest`（x64）——`macos-13`（x64）行已删除，因为 GitHub 已于 2025 年 12 月退役 macos-13（Intel）runner。
+- 步骤：`actions/checkout@v6` → `pnpm/action-setup` → `actions/setup-node@v6`（node 24，pnpm 缓存）→ `pnpm install --frozen-lockfile` → 构建（`build:lib`，然后 `tsc -p apps/desktop --noEmit` 类型检查，再构建桌面应用——主进程、渲染进程和收集的客户端 bundle）→ `pnpm --filter @deepseek-ai/dsh-desktop exec electron-builder --mac|--win` → 上传产物；推送标签时附加到 release。
 - env：`DSH_TELEMETRY_DISABLED=1`（仓库约定：CI 永不向生产遥测端点上报）。
 - 未签名构建：`CSC_IDENTITY_AUTO_DISCOVERY=false`、`mac.identity: null`。
-- 冒烟：在每台 runner 上传前短暂启动打包应用（`--version` 式冒烟或应用退出检查）。
+- 冒烟：在每台 runner 上传前用 `--smoke-test` 启动打包应用；应用只有在渲染进程报告已启动（`dsh:booted`，30 秒超时）后才以 0 退出，因此白屏或死掉的渲染进程会让该 lane 失败。
 
 ## 测试
 

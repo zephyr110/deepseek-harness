@@ -957,7 +957,7 @@ git commit -m "feat(desktop): host boot and ipc bridge wiring in main process"
   - `window.dsh.fetchRequest(req)`——`ipcRenderer.invoke('dsh:fetch', req)` 返回 `{status, headers, streamId}` 形信封（实际是 Task 2 的 `IpcFetchResponse`）
   - `window.dsh.onStream(callback)`——订阅 `dsh:stream` 事件
   - `window.dsh.loadBundle(url)`——经主进程从磁盘读取 bundle 文件（`ipcRenderer.invoke('dsh:load-bundle', url)`）
-- 修改：`apps/desktop/src/main/index.ts`——注册 `dsh:load-bundle` handler（读取 bundle 文件；解析把 `/plugins/<id>/client.js` 风格 url 映射到 workspace 包目录下构建后的 `lib/client.js`）
+- 修改：`apps/desktop/src/main/index.ts`——注册 `dsh:load-bundle` handler（读取 bundle 文件；解析把 `/plugins/<id>/client.js` 风格 url 映射到 bundle 根目录 `apps/desktop/dist/bundles` 下收集的 bundle，而不是 workspace 包——asar 无法回退解析到仓库根）
 - 修改：`packages/client/web/src/boot.tsx`？——不：`AppWebEntry` 已接受带 `loadBundle` 的 `BootSeams`；无需包改动。
 
 **接口：**
@@ -1334,9 +1334,6 @@ jobs:
           - target: macos-arm64
             runner: macos-latest
             args: '--mac --x64=false --arm64=true'
-          - target: macos-x64
-            runner: macos-13
-            args: '--mac --x64=true --arm64=false'
           - target: windows-x64
             runner: windows-latest
             args: '--win'
@@ -1371,7 +1368,7 @@ jobs:
         run: |
           case "${{ matrix.target }}" in
             macos-*)
-              APP="apps/desktop/dist-installers/mac*/DeepSeek Harness.app"
+              APP="apps/desktop/dist-installers/mac-arm64/DeepSeek Harness.app"
               "$APP/Contents/MacOS/DeepSeek Harness" --smoke-test
               ;;
             windows-x64)
@@ -1413,7 +1410,7 @@ jobs:
             --title "DeepSeek Harness Desktop $TAG" --generate-notes
 ```
 
-注意：如果落地时 GitHub 已退役 `macos-13` runner，删除 `macos-x64` 矩阵行（保留 arm64 + Windows）并在 PR 中注明。
+`macos-x64` 矩阵行在落地时已删除：GitHub 已于 2025 年 12 月退役 macos-13（Intel）runner，因此交付的矩阵是 macos-arm64 + windows-x64。
 
 - [ ] **步骤 2：验证工作流语法**
 
@@ -1471,4 +1468,4 @@ git commit -m "docs(desktop): agent note and README for the electron desktop she
 
 - **Spec 覆盖：** 每个 spec 小节都映射到一个任务——形态/IPC 载体 → Task 2–5；无 webserver 的宿主装配 → Task 4；打包（dmg/zip/NSIS、未签名、经 npmRebuild 重建 node-pty）→ Task 6；GitHub Actions 矩阵 + dispatch/标签触发器 + 遥测 env → Task 7；Agent Note + README → Task 8；tsconfig paths 规则 → Task 1；超出范围项（签名、自动更新、Linux）记录在 Task 8 的 README。
 - **规划期间核实过的环境事实（非占位）：** `defaultLoadBundle` = 经典 async script 元素（Task 5 用内联脚本镜像它）；`DSH_HOME_ENV`/`resolveDshHome` 优先级（Task 4 在启动前经 env 重定向）；`boot()` 返回带 `ctx.apiProxy` 的 `Context`（由 apiproxy 网关提供）；`loadBundle(url: string) => Promise<void>` 接缝；connection 包不得导入应用（Task 3 的传输辅助站在通道的位置上）。
-- **延后的环境事实：** x64 macOS 矩阵行的 `macos-13` runner 可用性（工作流注释记录删除回退方案）。
+- **延后的环境事实（落地时已解决）：** x64 macOS 矩阵行已删除——GitHub 已于 2025 年 12 月退役 `macos-13`（Intel）runner；交付的矩阵是 macos-arm64 + windows-x64。

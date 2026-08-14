@@ -2,5 +2,5 @@
 # side as of the last confirmed-consistent state. Both languages carry equal authority;
 # after editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/superpowers/specs/2026-08-14-electron-desktop-design.md
-2026-08-14-electron-desktop-design.md: 689d9982a1db81cdfe802f979e9ed39c5e8caf73
-2026-08-14-electron-desktop-design.zh.md: cab54f71a5a96840a98f146981f2666d77df4076
+2026-08-14-electron-desktop-design.md: 771ead7c74bae260f12f7f78347516ed9800f375
+2026-08-14-electron-desktop-design.zh.md: 12c70a261b7facdc58ca635ff875d2ec69d69f97

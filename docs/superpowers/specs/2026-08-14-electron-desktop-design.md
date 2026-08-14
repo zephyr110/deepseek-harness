@@ -71,19 +71,19 @@ The bridge framing logic (request serialization, stream chunking, response reass
 
 - appId: `ai.deepseek.dsh`; productName: `DeepSeek Harness`.
 - Targets: `mac: { target: [dmg, zip], identity: null }`, `win: { target: nsis }` (x64).
-- Files: built host `lib/` closure, renderer `dist/`, plugin client bundles (`lib/client.js` per client plugin), electron-builder config, resources (icon). Everything else is dev.
-- Icons: a simple generated icon set (icon.icns / icon.ico) under `apps/desktop/build/`; no brand art v1.
+- Files: built host `lib/` closure, renderer `dist/`, the collected plugin client bundles (`dist/bundles/<package>/client.js` — copied from each web client plugin's built `lib/client.js` by `scripts/collect-bundles.mjs` during the app build), electron-builder config, resources (icon). Everything else is dev.
+- Icon: `scripts/generate-icon.mjs` renders the official favicon's dark variant (white fish on a rounded `#1F2430` square) to `build/icon.png` with sharp; electron-builder derives icns/ico from it. No brand art v1.
 
 ## GitHub Actions workflow
 
 `.github/workflows/desktop-release.yml`, modeled on the repo's existing CI patterns (`build-exe-for-python-sdk.yml`):
 
 - Triggers: `workflow_dispatch` (manual) and push of tag `desktop-v*` (publishes a GitHub Release with the installers as assets).
-- Matrix: `macos-latest` (arm64), `macos-13` (x64), `windows-latest` (x64).
-- Steps: `actions/checkout@v6` → `pnpm/action-setup` → `actions/setup-node@v6` (node 24, pnpm cache) → `pnpm install --frozen-lockfile` → build (`build:lib` + `build:web` + desktop renderer) → `pnpm --filter @deepseek-ai/dsh-desktop exec electron-builder --mac|--win` → upload artifacts; on tag push, attach to the release.
+- Matrix: `macos-latest` (arm64) and `windows-latest` (x64) — the `macos-13` (x64) row was dropped because GitHub retired the macos-13 (Intel) runner in December 2025.
+- Steps: `actions/checkout@v6` → `pnpm/action-setup` → `actions/setup-node@v6` (node 24, pnpm cache) → `pnpm install --frozen-lockfile` → build (`build:lib`, then a `tsc -p apps/desktop --noEmit` typecheck, then the desktop app build — main, renderer, and the collected client bundles) → `pnpm --filter @deepseek-ai/dsh-desktop exec electron-builder --mac|--win` → upload artifacts; on tag push, attach to the release.
 - env: `DSH_TELEMETRY_DISABLED=1` (repo convention: CI never reports to the production telemetry endpoint).
 - Unsigned build: `CSC_IDENTITY_AUTO_DISCOVERY=false`, `mac.identity: null`.
-- Smoke: launch the packaged app briefly on each runner (`--version`-style smoke or app-exit check) before upload.
+- Smoke: launch the packaged app with `--smoke-test` on each runner before upload; the app exits 0 only after the renderer reports it booted (`dsh:booted`, 30s timeout), so a white or dead renderer fails the lane.
 
 ## Testing
 

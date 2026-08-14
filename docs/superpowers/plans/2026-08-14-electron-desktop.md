@@ -957,7 +957,7 @@ git commit -m "feat(desktop): host boot and ipc bridge wiring in main process"
   - `window.dsh.fetchRequest(req)` — `ipcRenderer.invoke('dsh:fetch', req)` returns `{status, headers, streamId}`-shaped envelope (actually the `IpcFetchResponse` from Task 2)
   - `window.dsh.onStream(callback)` — subscribes to `dsh:stream` events
   - `window.dsh.loadBundle(url)` — reads a bundle file from disk via the main process (`ipcRenderer.invoke('dsh:load-bundle', url)`)
-- Modify: `apps/desktop/src/main/index.ts` — register `dsh:load-bundle` handler (reads the bundle file; resolution maps `/plugins/<id>/client.js`-style URLs to the built `lib/client.js` under the workspace package dirs)
+- Modify: `apps/desktop/src/main/index.ts` — register `dsh:load-bundle` handler (reads the bundle file; resolution maps `/plugins/<id>/client.js`-style URLs to the collected bundle under the bundle root `apps/desktop/dist/bundles`, not the workspace packages — the asar cannot reach back to the repository root)
 - Modify: `packages/client/web/src/boot.tsx`? — NO: `AppWebEntry` already accepts `BootSeams` with `loadBundle`; no package change needed.
 
 **Interfaces:**
@@ -1334,9 +1334,6 @@ jobs:
           - target: macos-arm64
             runner: macos-latest
             args: '--mac --x64=false --arm64=true'
-          - target: macos-x64
-            runner: macos-13
-            args: '--mac --x64=true --arm64=false'
           - target: windows-x64
             runner: windows-latest
             args: '--win'
@@ -1371,7 +1368,7 @@ jobs:
         run: |
           case "${{ matrix.target }}" in
             macos-*)
-              APP="apps/desktop/dist-installers/mac*/DeepSeek Harness.app"
+              APP="apps/desktop/dist-installers/mac-arm64/DeepSeek Harness.app"
               "$APP/Contents/MacOS/DeepSeek Harness" --smoke-test
               ;;
             windows-x64)
@@ -1413,7 +1410,7 @@ jobs:
             --title "DeepSeek Harness Desktop $TAG" --generate-notes
 ```
 
-Note: if the `macos-13` runner has been retired by GitHub when this lands, drop the `macos-x64` matrix row (keep arm64 + Windows) and note it in the PR.
+The `macos-x64` matrix row was dropped at landing: GitHub retired the `macos-13` (Intel) runner in December 2025, so the shipped matrix is macos-arm64 + windows-x64.
 
 - [ ] **Step 2: Validate the workflow syntax**
 
@@ -1471,4 +1468,4 @@ git commit -m "docs(desktop): agent note and README for the electron desktop she
 
 - **Spec coverage:** every spec section maps to a task — form/IPC carrier → Tasks 2–5; host assembly without webserver → Task 4; packaging (dmg/zip/NSIS, unsigned, node-pty rebuild via npmRebuild) → Task 6; GitHub Actions matrix + dispatch/tag triggers + telemetry env → Task 7; Agent Note + README → Task 8; tsconfig paths rule → Task 1; out-of-scope items (signing, auto-update, Linux) are documented in Task 8's README.
 - **Environment facts verified during planning (not placeholders):** `defaultLoadBundle` = classic async script element (Task 5 mirrors it with inline script); `DSH_HOME_ENV`/`resolveDshHome` precedence (Task 4 redirects via env before boot); `boot()` returns `Context` with `ctx.apiProxy` provided by the apiproxy gateway; `loadBundle(url: string) => Promise<void>` seam; connection package must not import the app (Task 3 transport helper stands in for the channel).
-- **Deferred environment fact:** `macos-13` runner availability for the x64 macOS matrix row (workflow comment documents the drop-it fallback).
+- **Deferred environment fact (resolved at landing):** the x64 macOS matrix row was dropped — GitHub retired the `macos-13` (Intel) runner in December 2025; the shipped matrix is macos-arm64 + windows-x64.

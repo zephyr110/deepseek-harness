@@ -11,14 +11,14 @@
 | 进程 | 文件 | 职责 |
 |---|---|---|
 | 主进程 | `src/main/index.ts`、`host.ts`、`ipc-bridge.ts`、`manifest.ts` | 用 `dsh-app-boot.boot()` 启动宿主（无 webserver），注册 `dsh:fetch` / `dsh:stream` / `dsh:load-bundle` / `dsh:boot-manifest` 通道，打开窗口 |
-| Preload | `src/preload/index.ts` | `window.dsh` contextBridge 表面——`fetchRequest`、`onStream`、`loadBundle`、`bootManifest`；不暴露裸 IPC |
+| Preload | `src/preload/index.ts` | `window.dsh` contextBridge 表面——`fetchRequest`、`onStream`、`loadBundle`、`bootManifest`、`booted`（冒烟信号）；不暴露裸 IPC |
 | 渲染进程 | `src/renderer/main.tsx`、`transport.ts` | 基于桌面 IPC 传输层的共享 `AppWebEntry` 壳 |
 
 持久化位于操作系统用户数据目录下：Electron 入口在宿主启动前把 `DSH_HOME` 设为 `userData/dsh`。插件客户端 bundle 和 boot manifest（`{ rev, entries }`）走同一条 IPC 通道，而不是 webserver 的 HTTP 注入。
 
 ## 开发
 
-先有构建产物。从仓库根目录运行 `pnpm run build:lib` 构建宿主与客户端库——包括桌面 boot manifest 扫描的客户端 bundle——然后构建应用本身：
+先有构建产物。从仓库根目录运行 `pnpm run build:lib` 构建宿主与客户端库——包括客户端 bundle，应用的构建随后把它们收集进 `dist/bundles`（boot manifest 扫描的名册）——然后构建应用本身：
 
 ```sh
 pnpm run build:lib
@@ -38,7 +38,7 @@ pnpm --filter @deepseek-ai/dsh-desktop run dist       # installers
 pnpm --filter @deepseek-ai/dsh-desktop run dist:dir   # unpacked app only
 ```
 
-冒烟测试：打包后的应用接受 `--smoke-test`——启动宿主、打开窗口、打印 `dsh-desktop smoke OK` 并以 0 退出。CI 在打包后于每个矩阵目标上运行它。
+冒烟测试：打包后的应用接受 `--smoke-test`——启动宿主、打开窗口，并且只有在渲染进程报告已启动（`dsh:booted` 信号，否则 30 秒超时）后才打印 `dsh-desktop smoke OK (N entries)` 并以 0 退出。CI 在打包后于每个矩阵目标上运行它；白屏或死掉的渲染进程会让该 lane 失败，而不是靠 `did-finish-load` 假绿。
 
 ## Known Limitations and Deferred Work
 

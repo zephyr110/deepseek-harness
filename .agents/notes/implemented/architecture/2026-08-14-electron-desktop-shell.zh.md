@@ -17,8 +17,8 @@ Status: implemented
 ### 进程模型
 
 - **主进程**（`src/main/index.ts`、`host.ts`、`ipc-bridge.ts`、`manifest.ts`）：用 `dsh-app-boot.boot()` 启动宿主插件图，不导入 `dsh-host-webserver`，注册 `dsh:fetch` / `dsh:stream` / `dsh:load-bundle` / `dsh:boot-manifest` 通道，并打开一个 1200×800 的 `BrowserWindow`，配置 `contextIsolation: true`、`sandbox: true`、`nodeIntegration: false`。
-- **Preload**（`src/preload/index.ts`）：名为 `window.dsh` 的 `contextBridge` 表面，恰好四个方法——`fetchRequest`、`onStream`、`loadBundle`、`bootManifest`——不暴露裸 `ipcRenderer`。
-- **渲染进程**（`src/renderer/main.tsx`、`transport.ts`）：通过 IPC 请求 boot manifest，安装 `window.__DSH_DESKTOP__`，运行来自 `dsh-client-web` 的共享 `AppWebEntry` 壳，`loadBundle` 通过 IPC 实现。
+- **Preload**（`src/preload/index.ts`）：名为 `window.dsh` 的 `contextBridge` 表面，恰好五个方法——`fetchRequest`、`onStream`、`loadBundle`、`bootManifest`、`booted`（单向冒烟信号：渲染进程在 `AppWebEntry.run()` settle 后报告已启动的名册大小）——不暴露裸 `ipcRenderer`。
+- **渲染进程**（`src/renderer/main.tsx`、`transport.ts`）：通过 IPC 请求 boot manifest，安装 `window.__DSH_DESKTOP__`，运行来自 `dsh-client-web` 的共享 `AppWebEntry` 壳，`loadBundle` 通过 IPC 实现，并在启动 settle 后发送 `booted` 冒烟信号。
 
 ### IPC fetch 载体
 
@@ -35,11 +35,11 @@ Status: implemented
 
 ### 通过 IPC 的 manifest 与 bundle 加载
 
-`src/main/manifest.ts` 构建与 webserver 以 `window.__DSH_BOOT__` 注入的同一 wire 图——`{ rev, entries }`，url 形如 `/plugins/<id>/client.js?rev=<rev>`——方法是扫描 `dsh.client.platform === 'web'` 的已构建 workspace 包。`dsh:load-bundle` 通过同一次扫描把 url 解析回各包的 `lib/client.js`，因此名册与解析器不可能不一致。渲染进程用一个内联脚本评估 bundle，镜像默认 loader 的经典 async script 语义：bundle 在同步执行时用 `window.__ModuleLoader__.load` 注册工厂，load 事件在该执行之后触发。
+`src/main/manifest.ts` 构建与 webserver 以 `window.__DSH_BOOT__` 注入的同一 wire 图——`{ rev, entries }`，url 形如 `/plugins/<id>/client.js?rev=<rev>`——方法是扫描收集的 bundle 根目录：`scripts/collect-bundles.mjs`（应用构建的一部分）把每个 web 客户端插件（`dsh.client.platform === 'web'`，与 dev-web 相同的发现逻辑）的 bundle 冻结为 `apps/desktop/dist/bundles` 下的一个 `<package>/client.js`，electron-builder 将其打包进 asar。改为扫描 workspace 在打包后必然失效——asar 内的任何 URL 都无法回退解析到仓库根，名册会为空——因此主入口显式注入 bundle 根目录（打包后为 `app.getAppPath()/dist/bundles`，dev 为 `apps/desktop/dist/bundles`）。`dsh:load-bundle` 通过同一次扫描把 url 解析回 `<bundle 根目录>/<package>/client.js`，因此名册与解析器不可能不一致。渲染进程用一个内联脚本评估 bundle，镜像默认 loader 的经典 async script 语义：bundle 在同步执行时用 `window.__ModuleLoader__.load` 注册工厂，该执行在 append 时同步发生——完成就是 append 本身，因为现代 Chromium 只为 fetched 脚本触发 load 事件，从不给内联脚本触发（依赖它会让每个 bundle 加载挂起，启动卡在加载页）。
 
 ### 打包与发布 v1
 
-electron-builder 打包 `@deepseek-ai/dsh-desktop`（`appId: ai.deepseek.dsh`，产品名 DeepSeek Harness）：mac dmg + zip（`identity: null`）和 win NSIS x64。应用图标是生成而非绘制的：`scripts/generate-icon.mjs` 用 sharp 把官方 favicon.svg 的深色变体（圆角 `#1F2430` 方块上的白色鱼）渲染为 `build/icon.png`，改写字形填充并删除 `<style>` 媒体查询，因为 librsvg 从不求值 `prefers-color-scheme`。签名推迟：CI 设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`。`.github/workflows/desktop-release.yml` 在 `workflow_dispatch` 和 `desktop-v*` 标签上构建，矩阵为 macos-arm64 + windows-x64——macos-x64 行被删除，因为 GitHub 已于 2025 年 12 月退役 macos-13（Intel）runner——并且没有 `pnpm deploy` 闭包步骤：`electron-builder.yml` 的 `files` 指向 `apps/desktop/dist` 和 workspace `node_modules`，直接打包该布局已在本机验证。工作流在每个 runner 上对打包应用做冒烟测试，并把安装包附到标签的 GitHub Release。`pnpm-workspace.yaml` 把 `@electron/get@^3.0.0` 覆盖为 `^3.1.0`：electron-builder 26.15.3 的 `app-builder-lib` 引用只在 `@electron/get >= 3.1.0` 存在的 `ElectronDownloadCacheMode`，而声明的 `^3.0.0` 范围会让 lockfile 钉住过时的 3.0.0（electron 43 保留自己的 `@electron/get@^5.0.0`）。
+electron-builder 打包 `@deepseek-ai/dsh-desktop`（`appId: ai.deepseek.dsh`，产品名 DeepSeek Harness）：mac dmg + zip（`identity: null`）和 win NSIS x64。应用图标是生成而非绘制的：`scripts/generate-icon.mjs` 用 sharp 把官方 favicon.svg 的深色变体（圆角 `#1F2430` 方块上的白色鱼）渲染为 `build/icon.png`，改写字形填充并删除 `<style>` 媒体查询，因为 librsvg 从不求值 `prefers-color-scheme`。签名推迟：CI 设置 `CSC_IDENTITY_AUTO_DISCOVERY=false`。`.github/workflows/desktop-release.yml` 在 `workflow_dispatch` 和 `desktop-v*` 标签上构建，矩阵为 macos-arm64 + windows-x64——macos-x64 行被删除，因为 GitHub 已于 2025 年 12 月退役 macos-13（Intel）runner——并且没有 `pnpm deploy` 闭包步骤：`electron-builder.yml` 的 `files` 指向 `apps/desktop/dist`（main、preload、renderer、`dist/bundles`）和 workspace `node_modules`，直接打包该布局已在本机验证——bundle 收集进 `dist/bundles`，打包后的扫描由基于 fixture bundle 根目录的单元测试验证（显式 bundle 根注入是薄的 main 进程接线）。每个 desktop 依赖的 workspace 包的 peer 依赖都被声明为常规依赖：electron-builder 只打包常规依赖，因此在 dev 时靠提升满足的 peer 会从 asar 中缺失（宿主启动时报 `ERR_MODULE_NOT_FOUND`）——打包后的启动会在 union 补全前 fail-loud。工作流在每个 runner 上对打包应用做冒烟测试，并把安装包附到标签的 GitHub Release。`pnpm-workspace.yaml` 把 `@electron/get@^3.0.0` 覆盖为 `^3.1.0`：electron-builder 26.15.3 的 `app-builder-lib` 引用只在 `@electron/get >= 3.1.0` 存在的 `ElectronDownloadCacheMode`，而声明的 `^3.0.0` 范围会让 lockfile 钉住过时的 3.0.0（electron 43 保留自己的 `@electron/get@^5.0.0`）。
 
 ## 曾考虑的替代方案
 
@@ -52,4 +52,4 @@ electron-builder 打包 `@deepseek-ai/dsh-desktop`（`appId: ai.deepseek.dsh`，
 
 ## 结果
 
-协议面不变：web 与桌面共享客户端图、zod 校验过的信封和 SSE 分帧；桌面的全部新意就是一个 `doFetch` 覆写加一个接缝。桥核心是 Electron-free 的，因此六个 vitest 套件（`host-boot`、`ipc-bridge`、`ipc-framing`、`ipc-handler`、`manifest`、`renderer-transport`）在不起动 Electron 的情况下覆盖启动、分帧、流式传输、manifest 以及传输层的顺序与终止规则，打包后的应用还在 CI runner 上做冒烟测试。渲染进程保持薄壳：所有组合都活在宿主图中。v1 以未签名、无更新的状态交付：首次打开时出现 Gatekeeper/SmartScreen 警告，无自动更新，无 macOS x64 安装包，且中止的 fetch 会在传输 API 变更之前留下渲染进程传输层的流监听器（已记录的 follow-up）。agent-presets 未组合：会话创建的 preset 平面没有接入桌面配置。`@electron/get` 覆盖钉住了一个只有 electron-builder 打包路径才会命中的依赖版本冲突；这是一个 pnpm-workspace 层面的决策，注释记录了原因。
+协议面不变：web 与桌面共享客户端图、zod 校验过的信封和 SSE 分帧；桌面的全部新意就是一个 `doFetch` 覆写加一个接缝。桥核心是 Electron-free 的，因此六个 vitest 套件（`host-boot`、`ipc-bridge`、`ipc-framing`、`ipc-handler`、`manifest`、`renderer-transport`）在不起动 Electron 的情况下覆盖启动、分帧、流式传输、manifest 以及传输层的顺序与终止规则，打包后的应用还在 CI runner 上做冒烟测试——`--smoke-test` 只有在渲染进程通过 `dsh:booted` 报告已启动名册后才以 0 退出（30 秒超时后以 1 退出），因此白屏或死掉的渲染进程会让该 lane 失败，而不是靠 `did-finish-load` 假绿。渲染进程保持薄壳：所有组合都活在宿主图中。v1 以未签名、无更新的状态交付：首次打开时出现 Gatekeeper/SmartScreen 警告，无自动更新，无 macOS x64 安装包，且中止的 fetch 会在传输 API 变更之前留下渲染进程传输层的流监听器（已记录的 follow-up）。agent-presets 未组合：会话创建的 preset 平面没有接入桌面配置。`@electron/get` 覆盖钉住了一个只有 electron-builder 打包路径才会命中的依赖版本冲突；这是一个 pnpm-workspace 层面的决策，注释记录了原因。
