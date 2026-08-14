@@ -10,8 +10,10 @@
  * a listener installed after the reply resolves would drop those events.
  * Events carry the requestId the transport minted (the handler echoes it),
  * not the streamId, so filtering compares against the minted requestId.
- * Termination: the events iterator stops after the end/error event, so a
- * consumed response releases its listener instead of polling forever.
+ * Termination: the events iterator unsubscribes before yielding the end/error
+ * event and stops after it, so a response releases its listener even when the
+ * consumer (IpcApiClient's pull loop) stops resuming the generator at a
+ * terminal event instead of driving it to completion.
  */
 import type { DesktopBridge } from '../preload/index.ts'
 import type { IpcFetchRequest } from '../ipc/handler.ts'
@@ -31,11 +33,20 @@ export function createDesktopTransport(bridge: Pick<DesktopBridge, 'fetchRequest
     async request(req) {
       const requestId = crypto.randomUUID()
       const events: IpcStreamEvent[] = []
-      const unsubscribe = bridge.onStream((event) => {
+      const removeListener = bridge.onStream((event) => {
         // Stream events echo the requestId the transport minted; events from
         // other in-flight requests are ignored by this stream's mailbox.
         if (event.requestId === requestId) events.push(event)
       })
+      // Idempotent: the generator unsubscribes before yielding a terminal
+      // event (consumers stop resuming the generator there, so the finally
+      // would never run) and again in the finally as the return()/GC fallback.
+      let unsubscribed = false
+      const unsubscribe = (): void => {
+        if (unsubscribed) return
+        unsubscribed = true
+        removeListener()
+      }
       let response: Awaited<ReturnType<DesktopBridge['fetchRequest']>>
       try {
         response = await bridge.fetchRequest({ requestId, ...req } satisfies IpcFetchRequest)
@@ -54,8 +65,12 @@ export function createDesktopTransport(bridge: Pick<DesktopBridge, 'fetchRequest
                 await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
                 continue
               }
+              if (event.kind === 'end' || event.kind === 'error') {
+                unsubscribe()
+                yield event
+                return
+              }
               yield event
-              if (event.kind === 'end' || event.kind === 'error') return
             }
           } finally {
             unsubscribe()

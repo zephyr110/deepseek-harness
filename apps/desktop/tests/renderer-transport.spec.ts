@@ -123,4 +123,68 @@ describe('desktop renderer transport', () => {
     await expect(transport.request({ url: 'http://dsh.internal/api/x' })).rejects.toThrow('bridge down')
     expect(stub.unsubscribeCount()).toBe(1)
   })
+
+  it('releases the listener on end without the consumer resuming (IpcApiClient pull loop)', async () => {
+    const { bridge, requests, push, unsubscribeCount } = stubBridge()
+    const transport = createDesktopTransport(bridge)
+    const response = await transport.request({ url: 'http://dsh.internal/api/x' })
+    const requestId = requests[0]!.requestId
+    push({ requestId, kind: 'chunk', data: 'body' })
+    push({ requestId, kind: 'end' })
+    const iterator = response.events()[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: { requestId, kind: 'chunk', data: 'body' } })
+    // IpcApiClient's pull loop stops resuming the generator after end
+    // (controller.close() + return): the listener must already be gone.
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: { requestId, kind: 'end' } })
+    expect(unsubscribeCount()).toBe(1)
+    // With the listener removed, late pushes no longer accumulate in the mailbox.
+    push({ requestId, kind: 'chunk', data: 'after-end' })
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined })
+    expect(unsubscribeCount()).toBe(1)
+  })
+
+  it('releases the listener on error without the consumer resuming the generator', async () => {
+    const { bridge, requests, push, unsubscribeCount } = stubBridge()
+    const transport = createDesktopTransport(bridge)
+    const response = await transport.request({ url: 'http://dsh.internal/api/x' })
+    const requestId = requests[0]!.requestId
+    push({ requestId, kind: 'error', message: 'stream broke' })
+    const iterator = response.events()[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: { requestId, kind: 'error', message: 'stream broke' } })
+    // No further next(): the pull loop's controller.error() path never resumes.
+    expect(unsubscribeCount()).toBe(1)
+  })
+
+  it('unsubscribes via finally when the consumer cancels a yielded stream', async () => {
+    const { bridge, requests, push, unsubscribeCount } = stubBridge()
+    const transport = createDesktopTransport(bridge)
+    const response = await transport.request({ url: 'http://dsh.internal/api/x' })
+    const requestId = requests[0]!.requestId
+    push({ requestId, kind: 'chunk', data: 'one' })
+    const iterator: AsyncIterator<IpcStreamEvent, void, undefined> = response.events()[Symbol.asyncIterator]()
+    await expect(iterator.next()).resolves.toEqual({ done: false, value: { requestId, kind: 'chunk', data: 'one' } })
+    expect(unsubscribeCount()).toBe(0)
+    // Yield-suspended (no pending poll): return() resumes the generator body
+    // straight into the finally.
+    await expect(iterator.return?.()).resolves.toEqual({ done: true, value: undefined })
+    expect(unsubscribeCount()).toBe(1)
+  })
+
+  it('unsubscribes once the pending poll settles when the consumer cancels an empty mailbox', async () => {
+    const { bridge, requests, push, unsubscribeCount } = stubBridge()
+    const transport = createDesktopTransport(bridge)
+    const response = await transport.request({ url: 'http://dsh.internal/api/x' })
+    const requestId = requests[0]!.requestId
+    const iterator: AsyncIterator<IpcStreamEvent, void, undefined> = response.events()[Symbol.asyncIterator]()
+    const pending = iterator.next()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    // IpcApiClient cancels while its pull is awaiting the mailbox: the
+    // return() is queued behind the pending next() (async-generator FIFO), so
+    // the finally runs only once the next event settles that poll.
+    const cancelled = iterator.return?.()
+    push({ requestId, kind: 'end' })
+    await expect(pending).resolves.toEqual({ done: false, value: { requestId, kind: 'end' } })
+    await expect(cancelled).resolves.toEqual({ done: true, value: undefined })
+    expect(unsubscribeCount()).toBe(1)
+  })
 })
