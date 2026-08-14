@@ -150,6 +150,34 @@ describe('IpcApiClient', () => {
     await reader.cancel()
     expect(returned).toBe(true)
   })
+
+  it('rejects with the abort reason when the signal aborts while the transport is in flight', async () => {
+    const client = new ExposedIpcClient({
+      async request() {
+        await new Promise<void>(() => undefined)
+        return { status: 200, headers: {}, events: async function* () {} }
+      },
+    })
+    const controller = new AbortController()
+    const pending = client.send(new URL('http://dsh.internal/api/x'), { method: 'POST', signal: controller.signal })
+    const expectation = expect(pending).rejects.toThrow('caller cancelled')
+    controller.abort('caller cancelled')
+    await expectation
+  })
+
+  it('rejects pre-aborted signals without touching the transport', async () => {
+    let called = false
+    const client = new ExposedIpcClient({
+      async request() {
+        called = true
+        return { status: 200, headers: {}, events: async function* () {} }
+      },
+    })
+    const controller = new AbortController()
+    controller.abort()
+    await expect(client.send(new URL('http://dsh.internal/api/x'), { signal: controller.signal })).rejects.toThrow()
+    expect(called).toBe(false)
+  })
 })
 
 /** Test seam: doFetch is protected on the carrier; expose it for direct body inspection. */

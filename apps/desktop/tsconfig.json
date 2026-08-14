@@ -18,7 +18,10 @@
   // Workspace imports resolve through package exports to built `lib/types`
   // (the same two-anchor contract as apps/cli), so the app's source plane
   // typecheck depends on `pnpm run build:lib` having run. The references
-  // declare that dependency for `tsc -b` orchestration.
+  // declare that dependency for `tsc -b` orchestration — and, like the
+  // apps/web precedent, they cover every paths-resolved client package the
+  // source imports: a cross-project import into an unreferenced package
+  // fails TS2878 (unsafe rewrite between project output layouts).
   "references": [
     {
       "path": "../../packages/boot/app-boot"
@@ -28,6 +31,15 @@
     },
     {
       "path": "../../packages/util/home-paths"
+    },
+    {
+      "path": "../../packages/client/web"
+    },
+    {
+      "path": "../../packages/client/connection/tsconfig.client.json"
+    },
+    {
+      "path": "../../packages/client/modules"
     }
   ]
 }

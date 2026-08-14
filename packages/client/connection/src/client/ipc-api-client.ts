@@ -47,7 +47,27 @@ export class IpcApiClient extends AbstractApiClient {
     this.transport = transport
   }
 
-  protected override async doFetch(input: URL, init?: RequestInit): Promise<Response> {
+  protected override doFetch(input: URL, init?: RequestInit): Promise<Response> {
+    const signal = init?.signal ?? undefined
+    if (signal === undefined) return this.runTransport(input, init)
+    if (signal.aborted) return Promise.reject(abortError(signal))
+    return new Promise((resolve, reject) => {
+      const onAbort = (): void => { reject(abortError(signal)) }
+      signal.addEventListener('abort', onAbort, { once: true })
+      this.runTransport(input, init)
+        .then(resolve, reject)
+        .finally(() => { signal.removeEventListener('abort', onAbort) })
+    })
+  }
+
+  /**
+   * The IPC hop itself. The transport has no signal channel, so the caller's
+   * signal is enforced here — pre-aborted signals reject without touching the
+   * transport, and an abort while the transport is in flight rejects the call
+   * (the base client's timeout merge rides the same AbortSignal, so a hung
+   * transport cannot defeat the unary deadline).
+   */
+  private async runTransport(input: URL, init?: RequestInit): Promise<Response> {
     const headers: Record<string, string> = {}
     for (const [key, value] of init?.headers instanceof Headers ? init.headers : new Headers(init?.headers)) {
       headers[key] = value
@@ -104,4 +124,12 @@ export class IpcApiClient extends AbstractApiClient {
     })
     return new Response(stream, { status: response.status, headers: responseHeaders })
   }
+}
+
+/** Mirror fetch's abort rejection: the signal's reason when present, else a DOMException-style AbortError. */
+function abortError(signal: AbortSignal): Error {
+  const reason: unknown = signal.reason
+  if (reason instanceof Error) return reason
+  if (typeof reason === 'string') return new Error(reason)
+  return new Error('This operation was aborted')
 }

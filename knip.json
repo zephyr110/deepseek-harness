@@ -741,8 +741,15 @@
       ]
     },
     "apps/desktop": {
+      "entry": [
+        "src/renderer/node-module-stub.ts"
+      ],
       "ignoreDependencies": [
-        "@deepseek-ai/.+"
+        "@deepseek-ai/.+",
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
       ],
       "ignoreExportsUsedInFile": true
     },
