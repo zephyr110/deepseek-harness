@@ -182,8 +182,11 @@ export function createIpcConnectionRpc(transport: DesktopIpcTransport): ClientCo
         payload,
       }
       if (signal?.aborted === true) throw abortError(signal)
+      // The desktop renderer has no origin, so the target resolves to the
+      // in-process authority the main process accepts — exactly what the web
+      // caller's resolveBase falls back to without a location.
       const response = await transport.request({
-        url: `${channel}/${endpoint}`,
+        url: new URL(`${channel}/${endpoint}`, INTERNAL_BASE).href,
         init: {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -213,6 +216,9 @@ export function createIpcConnectionRpc(transport: DesktopIpcTransport): ClientCo
     },
   }
 }
+
+/** The in-process authority the desktop main process serves, mirroring the web caller's fallback base. */
+const INTERNAL_BASE = 'http://dsh.internal'
 
 /** The closed IpcStreamEvent union ends here: a new member is a compile error. */
 function assertNever(value: never): never {
