@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // TS 6.0 errors (TS6059) on files outside rootDir even with noEmit, and
+    // vite.config.ts / tsdown.config.ts are deliberately in `include`, so the
+    // root is the app dir. Emit is off; tsdown/vite produce the artifacts.
+    "rootDir": ".",
+    "outDir": "lib/types",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2024",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    // Source-level resolution for the workspace packages this app imports.
+    // Declaring `paths` here replaces the base map (no merge), so only the
+    // packages later tasks import are listed; every other package resolves
+    // through its installed workspace symlink.
+    "paths": {
+      "@deepseek-ai/dsh-app-boot": ["../../packages/boot/app-boot/src"],
+      "@deepseek-ai/dsh-host-apiproxy": ["../../packages/host/apiproxy/src"],
+      "@deepseek-ai/dsh-client-web": ["../../packages/client/web/src"],
+      "@deepseek-ai/dsh-client-connection": ["../../packages/client/connection/src"],
+      "@deepseek-ai/dsh-client-modules": ["../../packages/client/modules/src"]
+    }
+  },
+  "include": ["src", "vite.config.ts", "tsdown.config.ts"]
+}

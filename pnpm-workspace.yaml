@@ -53,6 +53,13 @@ allowBuilds:
   # The Python runtime deploy includes the reviewed workspace postinstall that
   # restores the executable bit on node-pty's macOS spawn helper.
   '@deepseek-ai/dsh-subprocess-local@file:packages/subprocess/subprocess-local': true
+  # Electron's published 43.x manifest ships no scripts field, but pnpm's
+  # build-script detection still requires the allow entry; the prebuilt binary
+  # downloads lazily on first `electron .` run (node_modules/electron/index.js).
+  electron: true
+  # Pulled in by electron-builder for Windows installers; its script is a no-op
+  # we don't need (we deny it), so install still succeeds.
+  electron-winstaller: false
 
 minimumReleaseAgeExclude:
   # Fresh pi-ai releases carry the model catalog updates that are the whole
