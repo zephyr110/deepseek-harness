@@ -27,6 +27,10 @@ linkWorkspacePackages: true
 overrides:
   '@deepseek-ai/cosmokit': 'link:vendor/cosmokit'
   '@deepseek-ai/schemastery': 'link:vendor/schemastery'
+  # electron-builder 26.15.3's app-builder-lib references ElectronDownloadCacheMode,
+  # which only exists in @electron/get >= 3.1.0; its declared ^3.0.0 range lets the
+  # lockfile pin the stale 3.0.0. electron@43 keeps its own @electron/get@^5.0.0.
+  '@electron/get@^3.0.0': '^3.1.0'
 
 peerDependencyRules:
   allowedVersions:

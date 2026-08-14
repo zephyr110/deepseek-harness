@@ -10,7 +10,10 @@
     "build:main": "tsdown",
     "build:renderer": "vite build",
     "dev:renderer": "vite",
-    "start": "electron ."
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:dir": "electron-builder --dir",
+    "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
     "@deepseek-ai/cordis-plugin-hmr": "workspace:^",
@@ -114,6 +117,7 @@
     "@types/react-dom": "~18.3.0",
     "@vitejs/plugin-react": "^4.0.0",
     "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",

@@ -742,7 +742,8 @@
     },
     "apps/desktop": {
       "entry": [
-        "src/renderer/node-module-stub.ts"
+        "src/renderer/node-module-stub.ts",
+        "scripts/**/*.mjs"
       ],
       "ignoreDependencies": [
         "@deepseek-ai/.+",

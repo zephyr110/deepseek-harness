@@ -1,0 +1,31 @@
+appId: ai.deepseek.dsh
+productName: DeepSeek Harness
+directories:
+  output: dist-installers
+  buildResources: build
+files:
+  - dist/main/**/*
+  - dist/preload/**/*
+  - dist/renderer/**/*
+  - cordis.yml
+  - package.json
+asar: true
+npmRebuild: true
+mac:
+  category: public.app-category.developer-tools
+  identity: null
+  target:
+    - dmg
+    - zip
+  icon: build/icon.png
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+electronDownload:
+  cache: ${os.homeDir}/.cache/electron
