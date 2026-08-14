@@ -147,6 +147,14 @@ export class AppWebEntry {
     this.root?.unmount()
   }
 
+  /**
+   * The boot failure report, when the boot chain settled on the error page.
+   * @returns the error message, or undefined when the chain settled cleanly.
+   */
+  getError(): string | undefined {
+    return this.error.getSnapshot()
+  }
+
   /** Prefetch the immediately tier (factory registration only; failures defer to the import path). */
   private async prefetchImmediateTier(): Promise<void> {
     await Promise.all(this.manifest.plugins

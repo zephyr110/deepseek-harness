@@ -1,0 +1,45 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // TS 6.0 errors (TS6059) on files outside rootDir even with noEmit, and
+    // vite.config.ts / tsdown.config.ts are deliberately in `include`, so the
+    // root is the app dir. Emit is off; tsdown/vite produce the artifacts.
+    "rootDir": ".",
+    "outDir": "lib/types",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "lib": [
+      "ES2024",
+      "DOM",
+      "DOM.Iterable"
+    ]
+  },
+  "include": ["src", "tests", "vite.config.ts", "tsdown.config.ts"],
+  // Workspace imports resolve through package exports to built `lib/types`
+  // (the same two-anchor contract as apps/cli), so the app's source plane
+  // typecheck depends on `pnpm run build:lib` having run. The references
+  // declare that dependency for `tsc -b` orchestration — and, like the
+  // apps/web precedent, they cover every paths-resolved client package the
+  // source imports: a cross-project import into an unreferenced package
+  // fails TS2878 (unsafe rewrite between project output layouts).
+  "references": [
+    {
+      "path": "../../packages/boot/app-boot"
+    },
+    {
+      "path": "../../packages/host/apiproxy"
+    },
+    {
+      "path": "../../packages/util/home-paths"
+    },
+    {
+      "path": "../../packages/client/web"
+    },
+    {
+      "path": "../../packages/client/connection/tsconfig.client.json"
+    },
+    {
+      "path": "../../packages/client/modules"
+    }
+  ]
+}

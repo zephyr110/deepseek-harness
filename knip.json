@@ -740,6 +740,20 @@
         "@deepseek-ai/.+"
       ]
     },
+    "apps/desktop": {
+      "entry": [
+        "src/renderer/node-module-stub.ts",
+        "scripts/**/*.mjs"
+      ],
+      "ignoreDependencies": [
+        "@deepseek-ai/.+",
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "ignoreExportsUsedInFile": true
+    },
     "packages/client/modules": {
       "entry": [
         "tests/**/*.spec.ts"
