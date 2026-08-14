@@ -12,18 +12,22 @@
       "ES2024",
       "DOM",
       "DOM.Iterable"
-    ],
-    // Source-level resolution for the workspace packages this app imports.
-    // Declaring `paths` here replaces the base map (no merge), so only the
-    // packages later tasks import are listed; every other package resolves
-    // through its installed workspace symlink.
-    "paths": {
-      "@deepseek-ai/dsh-app-boot": ["../../packages/boot/app-boot/src"],
-      "@deepseek-ai/dsh-host-apiproxy": ["../../packages/host/apiproxy/src"],
-      "@deepseek-ai/dsh-client-web": ["../../packages/client/web/src"],
-      "@deepseek-ai/dsh-client-connection": ["../../packages/client/connection/src"],
-      "@deepseek-ai/dsh-client-modules": ["../../packages/client/modules/src"]
-    }
+    ]
   },
-  "include": ["src", "vite.config.ts", "tsdown.config.ts"]
+  "include": ["src", "tests", "vite.config.ts", "tsdown.config.ts"],
+  // Workspace imports resolve through package exports to built `lib/types`
+  // (the same two-anchor contract as apps/cli), so the app's source plane
+  // typecheck depends on `pnpm run build:lib` having run. The references
+  // declare that dependency for `tsc -b` orchestration.
+  "references": [
+    {
+      "path": "../../packages/boot/app-boot"
+    },
+    {
+      "path": "../../packages/host/apiproxy"
+    },
+    {
+      "path": "../../packages/util/home-paths"
+    }
+  ]
 }
