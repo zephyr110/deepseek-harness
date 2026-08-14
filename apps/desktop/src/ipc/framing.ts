@@ -1,4 +1,9 @@
-/** Wire framing for the IPC fetch bridge. Events are JSON strings carried by `webContents.send('dsh:stream', ...)`. */
+/**
+ * Wire framing for the IPC fetch bridge. Events are JSON strings carried by
+ * `webContents.send('dsh:stream', ...)`. The variant interfaces are exported
+ * individually so the preload sender side can construct events; parsing
+ * narrows through the IpcStreamEvent union.
+ */
 
 export interface IpcChunkEvent { requestId: string; kind: 'chunk'; data: string }
 export interface IpcEndEvent { requestId: string; kind: 'end' }

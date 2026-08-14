@@ -20,6 +20,7 @@
     "@deepseek-ai/dsh-agent-instructions": "workspace:^",
     "@deepseek-ai/dsh-agent-loop": "workspace:^",
     "@deepseek-ai/dsh-api-gateway": "workspace:^",
+    "@deepseek-ai/dsh-app-boot": "workspace:^",
     "@deepseek-ai/dsh-attachment-local": "workspace:^",
     "@deepseek-ai/dsh-base": "workspace:^",
     "@deepseek-ai/dsh-bash-sandbox": "workspace:^",
@@ -106,14 +107,10 @@
     "@deepseek-ai/dsh-workspace": "workspace:^"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-client-web": "workspace:^",
-    "@deepseek-ai/dsh-client-connection": "workspace:^",
-    "@deepseek-ai/dsh-client-modules": "workspace:^",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.0",
     "@vitejs/plugin-react": "^4.0.0",
     "electron": "^43.0.0",
-    "electron-builder": "^26.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "tsdown": "^0.22.2",
