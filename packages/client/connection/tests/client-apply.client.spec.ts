@@ -8,6 +8,7 @@ import { apply, type ConnectionHandle } from '../src/client/index.ts'
 import type { RpcMessage } from '../src/client/api.ts'
 import { RpcId } from '../src/client/api.ts'
 import { FixtureApiClient } from '../src/client/fixture.ts'
+import { IpcApiClient } from '../src/client/ipc-api-client.ts'
 import { WebApiClient } from '../src/client/web-api-client.ts'
 
 type Win = { location?: { hostname: string; search: string; origin?: string } }
@@ -68,6 +69,19 @@ describe('connection client apply', () => {
     const handle = await mount()
     expect(handle.api).toBeInstanceOf(WebApiClient)
     expect(handle.isLoopback).toBe(true)
+  })
+
+  it('selects the IPC carrier when the desktop bridge is present', async () => {
+    ;(globalThis as Win).location = { hostname: 'localhost', search: '' }
+    ;(globalThis as unknown as { window: unknown }).window = {
+      __DSH_DESKTOP__: { transport: { request: async () => { throw new Error('not reached') } } },
+    }
+    try {
+      const handle = await mount()
+      expect(handle.api).toBeInstanceOf(IpcApiClient)
+    } finally {
+      delete (globalThis as { window?: unknown }).window
+    }
   })
 
   it('selects the fixture client under ?fixture (and with no location at all stays real)', async () => {

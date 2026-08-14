@@ -7,6 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { HostDescription, IApiClient } from './api.ts'
 import { ConnectionController, type ConnectionConfig, type ConnectionSinks, type ConnectionState } from './connection.ts'
 import { FixtureApiClient } from './fixture.ts'
+import { IpcApiClient, type DesktopIpcTransport } from './ipc-api-client.ts'
 import { WebApiClient } from './web-api-client.ts'
 import { createWebConnectionRpc } from './rpc.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
@@ -35,6 +36,7 @@ export {
   AbstractApiClient,
   transportError,
 } from './api.ts'
+export { IpcApiClient, type DesktopIpcTransport, type IpcStreamEvent } from './ipc-api-client.ts'
 
 // Connection loop types are public through ConnectionHandle.start; the
 // controller remains package-internal.
@@ -77,6 +79,13 @@ export interface ConnectionHandle {
   start(sinks: ConnectionSinks, config?: ConnectionConfig): { stop(): void }
 }
 
+declare global {
+  interface Window {
+    /** Present in the Electron desktop renderer; selects the IPC carrier. */
+    __DSH_DESKTOP__?: { transport: DesktopIpcTransport }
+  }
+}
+
 /**
  * Client plugin body: pick the api by page mode and provide ctx.connection.
  * @param ctx - client cordis context.
@@ -85,7 +94,8 @@ export function apply(ctx: Context): void {
   const pageLocation = typeof location === 'undefined' ? undefined : location
   const fixture = pageLocation !== undefined && new URLSearchParams(pageLocation.search).has('fixture')
   const fixtureClient = fixture ? new FixtureApiClient() : undefined
-  const api: IApiClient = fixtureClient ?? new WebApiClient()
+  const desktopTransport = typeof window !== 'undefined' ? window.__DSH_DESKTOP__?.transport : undefined
+  const api: IApiClient = fixtureClient ?? (desktopTransport !== undefined ? new IpcApiClient(desktopTransport) : new WebApiClient())
   const rpc = fixtureClient?.rpc ?? createWebConnectionRpc()
   let started = false
   let description: HostDescription | undefined
