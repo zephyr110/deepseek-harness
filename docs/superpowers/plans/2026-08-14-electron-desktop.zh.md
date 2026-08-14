@@ -1,46 +1,46 @@
-# Electron Desktop App Implementation Plan
+# Electron 桌面应用实现计划
 
-English | [中文](2026-08-14-electron-desktop.zh.md)
+[English](2026-08-14-electron-desktop.md) | 中文
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **面向 agentic workers：** 必选子技能：使用 superpowers:subagent-driven-development（推荐）或 superpowers:executing-plans 逐任务实现本计划。步骤使用复选框（`- [ ]`）语法跟踪。
 
-**Goal:** Ship an Electron desktop app (`apps/desktop`) for macOS (arm64) and Windows (x64) that embeds the harness host in-process, reuses the web client shell over an IPC fetch carrier, and is packaged into installers (mac dmg+zip, win NSIS) by a GitHub Actions workflow.
+**目标：** 为 macOS（arm64）和 Windows（x64）交付一个 Electron 桌面应用（`apps/desktop`）：在进程内嵌入 harness 宿主，通过 IPC fetch 载体复用 web 客户端壳，并由 GitHub Actions 工作流打包成安装程序（mac dmg+zip，win NSIS）。
 
-**Architecture:** The Electron main process boots the host plugin graph with `dsh-app-boot.boot()` (base profile + a desktop cordis patch, no webserver), exposes `ctx.apiProxy` through an `ipcMain` fetch bridge backed by `toFetchHandler(ctx.apiProxy)`. The renderer runs the existing `AppWebEntry` shell with a `loadBundle` seam over IPC and an `IpcApiClient` (`AbstractApiClient` subclass) instead of `WebApiClient`. The four-quadrant RPC protocol is untouched — only the transport aspect changes. electron-builder packages the app; a workflow matrix builds and releases installers.
+**架构：** Electron 主进程用 `dsh-app-boot.boot()` 启动宿主插件图（base profile + 一个桌面 cordis patch，无 webserver），通过以 `toFetchHandler(ctx.apiProxy)` 为后端的 `ipcMain` fetch 桥暴露 `ctx.apiProxy`。渲染进程运行现有的 `AppWebEntry` 壳，`loadBundle` 接缝走 IPC，使用 `IpcApiClient`（`AbstractApiClient` 子类）而非 `WebApiClient`。四象限 RPC 协议不变——只有传输方面改变。electron-builder 打包应用；工作流矩阵构建并发布安装程序。
 
-**Tech Stack:** Electron 43 (bundled Node 24.18, satisfies `node: ^22.19.0 || >=24.0.0`), pnpm 11.7 workspaces, TypeScript 6, Vite 6 (renderer), tsdown (main/preload), electron-builder, vitest, GitHub Actions.
+**技术栈：** Electron 43（内置 Node 24.18，满足 `node: ^22.19.0 || >=24.0.0`）、pnpm 11.7 workspaces、TypeScript 6、Vite 6（渲染进程）、tsdown（主进程/preload）、electron-builder、vitest、GitHub Actions。
 
-## Global Constraints
+## 全局约束
 
-- ESM everywhere; local relative imports use `.ts` extensions; no CJS exports in packages the dsh CLI source-launch reaches (repo convention).
-- Node `^22.19.0 || >=24.0.0`; Electron `^43`.
-- Every package is `@deepseek-ai/dsh-<name>`; the app is `@deepseek-ai/dsh-desktop` (private).
-- Host/client group packages (`packages/host/*`, `packages/client/*`) need explicit tsconfig `paths` entries resolved to `src` (naming rule), including `/client` subpaths.
-- `DSH_TELEMETRY_DISABLED=1` on CI (repo convention: CI never reports to the production telemetry endpoint).
-- Unsigned builds: `CSC_IDENTITY_AUTO_DISCOVERY=false`, `mac.identity: null`.
-- Commit messages in English, conventional style (e.g. `feat(desktop): ...`).
-- Tests: vitest; behavior-first; non-trivial changes include an Agent Note + README in the same PR.
-- `pnpm run build:lib` must have run before desktop build steps that consume workspace `lib/` outputs (electron-builder packs built `lib/` closures, not `src/`).
+- 处处 ESM；本地相对导入使用 `.ts` 扩展名；dsh CLI 源码启动触达的包中不得有 CJS 导出（仓库约定）。
+- Node `^22.19.0 || >=24.0.0`；Electron `^43`。
+- 每个包都是 `@deepseek-ai/dsh-<name>`；应用是 `@deepseek-ai/dsh-desktop`（私有）。
+- host/client 组包（`packages/host/*`、`packages/client/*`）需要显式 tsconfig `paths` 条目解析到 `src`（命名规则），包括 `/client` 子路径。
+- CI 上 `DSH_TELEMETRY_DISABLED=1`（仓库约定：CI 永不向生产遥测端点上报）。
+- 未签名构建：`CSC_IDENTITY_AUTO_DISCOVERY=false`、`mac.identity: null`。
+- 提交信息用英文，conventional 风格（例如 `feat(desktop): ...`）。
+- 测试：vitest；行为优先；非平凡改动在同一 PR 中附带 Agent Note + README。
+- 在消费 workspace `lib/` 产物的桌面构建步骤之前必须先运行 `pnpm run build:lib`（electron-builder 打包构建后的 `lib/` 闭包，而非 `src/`）。
 
 ---
 
-### Task 1: apps/desktop scaffold — package, tsconfig, minimal Electron shell
+### Task 1：apps/desktop 脚手架——包、tsconfig、最小 Electron 壳
 
-**Files:**
-- Create: `apps/desktop/package.json`
-- Create: `apps/desktop/tsconfig.json`
-- Create: `apps/desktop/tsdown.config.ts`
-- Create: `apps/desktop/vite.config.ts`
-- Create: `apps/desktop/src/renderer/index.html`
-- Create: `apps/desktop/src/renderer/main.tsx` (placeholder shell — real boot lands in Task 5)
-- Create: `apps/desktop/src/main/index.ts` (placeholder — host wiring lands in Task 4)
-- Create: `apps/desktop/src/preload/index.ts` (placeholder — real bridge lands in Task 5)
-- Modify: `pnpm-workspace.yaml` (add `apps/desktop` — verify whether `apps/*` glob already covers it; add if not)
+**文件：**
+- 创建：`apps/desktop/package.json`
+- 创建：`apps/desktop/tsconfig.json`
+- 创建：`apps/desktop/tsdown.config.ts`
+- 创建：`apps/desktop/vite.config.ts`
+- 创建：`apps/desktop/src/renderer/index.html`
+- 创建：`apps/desktop/src/renderer/main.tsx`（占位壳——真正的启动在 Task 5）
+- 创建：`apps/desktop/src/main/index.ts`（占位——宿主接线在 Task 4）
+- 创建：`apps/desktop/src/preload/index.ts`（占位——真正的桥在 Task 5）
+- 修改：`pnpm-workspace.yaml`（添加 `apps/desktop`——核实 `apps/*` glob 是否已覆盖；未覆盖则添加）
 
-**Interfaces:**
-- Produces: `@deepseek-ai/dsh-desktop` workspace with scripts `build` (tsdown main+preload, vite renderer), `dev`, `start` (`electron .`); Electron main entry `dist/main/index.js`, preload `dist/preload/index.cjs`, renderer `dist/renderer/index.html`.
+**接口：**
+- 产出：`@deepseek-ai/dsh-desktop` workspace，脚本 `build`（tsdown 主进程+preload，vite 渲染进程）、`dev`、`start`（`electron .`）；Electron 主入口 `dist/main/index.js`、preload `dist/preload/index.cjs`、渲染进程 `dist/renderer/index.html`。
 
-- [ ] **Step 1: Write the package manifest**
+- [ ] **步骤 1：写包 manifest**
 
 ```json
 {
@@ -77,9 +77,9 @@ English | [中文](2026-08-14-electron-desktop.zh.md)
 }
 ```
 
-Note: `dependencies` grows in Task 4 (host plugin packages needed at runtime, resolved via the base profile bundles). electron-builder packs `dependencies`; renderer-only packages stay dev.
+注意：`dependencies` 在 Task 4 中增长（运行时需要的宿主插件包，经 base profile bundle 解析）。electron-builder 打包 `dependencies`；仅渲染进程使用的包留在 dev。
 
-- [ ] **Step 2: Write tsconfig**
+- [ ] **步骤 2：写 tsconfig**
 
 ```json
 {
@@ -94,9 +94,9 @@ Note: `dependencies` grows in Task 4 (host plugin packages needed at runtime, re
 }
 ```
 
-(Add explicit `paths` entries for every `packages/host/*` and `packages/client/*` dependency the app imports — copy the pattern from `apps/web/tsconfig.json`; at this point: `@deepseek-ai/dsh-client-web`, `@deepseek-ai/dsh-client-connection`, `@deepseek-ai/dsh-client-modules`, `@deepseek-ai/dsh-host-apiproxy`, `@deepseek-ai/dsh-app-boot`.)
+（为应用导入的每个 `packages/host/*` 和 `packages/client/*` 依赖添加显式 `paths` 条目——复制 `apps/web/tsconfig.json` 的模式；目前是：`@deepseek-ai/dsh-client-web`、`@deepseek-ai/dsh-client-connection`、`@deepseek-ai/dsh-client-modules`、`@deepseek-ai/dsh-host-apiproxy`、`@deepseek-ai/dsh-app-boot`。）
 
-- [ ] **Step 3: Write tsdown config (main + preload)**
+- [ ] **步骤 3：写 tsdown 配置（主进程 + preload）**
 
 ```ts
 import { defineConfig } from 'tsdown'
@@ -122,7 +122,7 @@ export default defineConfig([
 ])
 ```
 
-- [ ] **Step 4: Write vite config (renderer)**
+- [ ] **步骤 4：写 vite 配置（渲染进程）**
 
 ```ts
 import { defineConfig } from 'vite'
@@ -138,9 +138,9 @@ export default defineConfig({
 })
 ```
 
-- [ ] **Step 5: Placeholder entry files (real logic lands in later tasks)**
+- [ ] **步骤 5：占位入口文件（真正的逻辑在后续任务）**
 
-`apps/desktop/src/renderer/index.html`:
+`apps/desktop/src/renderer/index.html`：
 
 ```html
 <!doctype html>
@@ -150,7 +150,7 @@ export default defineConfig({
 </html>
 ```
 
-`apps/desktop/src/renderer/main.tsx` (placeholder — replaced in Task 5):
+`apps/desktop/src/renderer/main.tsx`（占位——在 Task 5 中替换）：
 
 ```tsx
 import { createRoot } from 'react-dom/client'
@@ -160,7 +160,7 @@ if (el === null) throw new Error('desktop renderer: missing #root')
 createRoot(el).render(<div>DeepSeek Harness desktop</div>)
 ```
 
-`apps/desktop/src/main/index.ts` (placeholder — replaced in Task 4/5):
+`apps/desktop/src/main/index.ts`（占位——在 Task 4/5 中替换）：
 
 ```ts
 import { app, BrowserWindow } from 'electron'
@@ -186,28 +186,28 @@ export async function createMainWindow(): Promise<BrowserWindow> {
 void app.whenReady().then(() => createMainWindow())
 ```
 
-`apps/desktop/src/preload/index.ts` (placeholder):
+`apps/desktop/src/preload/index.ts`（占位）：
 
 ```ts
 // Task 5 replaces this with the contextBridge surface.
 export {}
 ```
 
-- [ ] **Step 6: Install and typecheck**
+- [ ] **步骤 6：安装并类型检查**
 
 Run: `cd /Users/zephyr/code/deepseek-harness && pnpm install --filter @deepseek-ai/dsh-desktop`
 
 Run: `pnpm --filter @deepseek-ai/dsh-desktop exec tsc --noEmit`
 
-Expected: no type errors.
+预期：无类型错误。
 
-- [ ] **Step 7: Build all three faces**
+- [ ] **步骤 7：构建三个面**
 
 Run: `pnpm --filter @deepseek-ai/dsh-desktop run build`
 
-Expected: `dist/main/index.js`, `dist/preload/index.cjs`, `dist/renderer/index.html` exist.
+预期：`dist/main/index.js`、`dist/preload/index.cjs`、`dist/renderer/index.html` 存在。
 
-- [ ] **Step 8: Commit**
+- [ ] **步骤 8：提交**
 
 ```bash
 git add apps/desktop pnpm-workspace.yaml pnpm-lock.yaml
@@ -216,23 +216,23 @@ git commit -m "feat(desktop): scaffold apps/desktop with electron main, preload,
 
 ---
 
-### Task 2: IPC fetch bridge core — main-process framing (Electron-free, vitest)
+### Task 2：IPC fetch 桥核心——主进程分帧（Electron-free，vitest）
 
-**Files:**
-- Create: `apps/desktop/src/ipc/framing.ts` — request/stream frame types and serialization helpers (pure, no electron import)
-- Create: `apps/desktop/src/ipc/handler.ts` — `createIpcFetchHandler(fetchFn)` returns `{ handleRequest, streamSubscribers }`: runs the WHATWG fetch, resolves `{status, headers, streamId}`, pushes body chunks to subscribers, error propagation
-- Test: `apps/desktop/tests/ipc-framing.spec.ts`
-- Test: `apps/desktop/tests/ipc-handler.spec.ts`
+**文件：**
+- 创建：`apps/desktop/src/ipc/framing.ts`——请求/流帧类型与序列化辅助（纯逻辑，无 electron 导入）
+- 创建：`apps/desktop/src/ipc/handler.ts`——`createIpcFetchHandler(fetchFn)` 返回 `{ handleRequest, streamSubscribers }`：运行 WHATWG fetch，解析 `{status, headers, streamId}`，向订阅者推送 body 块，错误传播
+- 测试：`apps/desktop/tests/ipc-framing.spec.ts`
+- 测试：`apps/desktop/tests/ipc-handler.spec.ts`
 
-**Interfaces:**
-- Consumes: nothing (pure).
-- Produces:
+**接口：**
+- 消费：无（纯逻辑）。
+- 产出：
   - `interface IpcFetchRequest { requestId: string; url: string; init?: { method?: string; headers?: Record<string,string>; body?: string } }`
   - `type IpcStreamEvent = { requestId: string; kind: 'chunk'; data: string } | { requestId: string; kind: 'end' } | { requestId: string; kind: 'error'; message: string }`
   - `createIpcFetchHandler(fetchFn: (url: string, init?: RequestInit) => Promise<Response>): { handleRequest(req: IpcFetchRequest): Promise<{ status: number; headers: Record<string,string>; streamId: string }>; subscribe(streamId: string, cb: (ev: IpcStreamEvent) => void): () => void; cleanup(): void }`
-  - Task 4 wires it: `createIpcFetchHandler((url, init) => toFetchHandler(api).fetch(new URL(url), init))`.
+  - Task 4 接线：`createIpcFetchHandler((url, init) => toFetchHandler(api).fetch(new URL(url), init))`。
 
-- [ ] **Step 1: Write the failing framing test**
+- [ ] **步骤 1：写失败的 framing 测试**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -254,13 +254,13 @@ describe('ipc framing', () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **步骤 2：运行测试验证其失败**
 
 Run: `pnpm exec vitest run apps/desktop/tests/ipc-framing.spec.ts`
 
-Expected: FAIL — `parseIpcStreamEvent`/`serializeIpcStreamEvent` not defined.
+预期：FAIL——`parseIpcStreamEvent`/`serializeIpcStreamEvent` 未定义。
 
-- [ ] **Step 3: Implement framing**
+- [ ] **步骤 3：实现 framing**
 
 ```ts
 /** Wire framing for the IPC fetch bridge. Events are JSON strings carried by `webContents.send('dsh:stream', ...)`. */
@@ -294,13 +294,13 @@ export function parseIpcStreamEvent(raw: string): IpcStreamEvent {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [ ] **步骤 4：运行测试验证其通过**
 
 Run: `pnpm exec vitest run apps/desktop/tests/ipc-framing.spec.ts`
 
-Expected: PASS.
+预期：PASS。
 
-- [ ] **Step 5: Write the failing handler test (streaming behavior against a real SSE source)**
+- [ ] **步骤 5：写失败的 handler 测试（针对真实 SSE 源的流式行为）**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -333,13 +333,13 @@ describe('ipc fetch handler', () => {
 })
 ```
 
-- [ ] **Step 6: Run test to verify it fails**
+- [ ] **步骤 6：运行测试验证其失败**
 
 Run: `pnpm exec vitest run apps/desktop/tests/ipc-handler.spec.ts`
 
-Expected: FAIL — `createIpcFetchHandler` not defined.
+预期：FAIL——`createIpcFetchHandler` 未定义。
 
-- [ ] **Step 7: Implement the handler**
+- [ ] **步骤 7：实现 handler**
 
 ```ts
 import { randomUUID } from 'node:crypto'
@@ -435,15 +435,15 @@ export function createIpcFetchHandler(fetchFn: IpcFetchFn): {
 }
 ```
 
-Note: a body may have finished before the renderer subscribes (small unary responses). The `end`-before-subscribe case is handled in Task 3's client: the client caches buffered events until `subscribe` — see the client-side `eventBuffer` in Task 3.
+注意：body 可能在渲染进程订阅之前就已结束（小的 unary 响应）。end-先于-subscribe 的情形在 Task 3 的客户端中处理：客户端缓存缓冲事件直到 `subscribe`——见 Task 3 中的客户端 `eventBuffer`。
 
-- [ ] **Step 8: Run tests to verify they pass**
+- [ ] **步骤 8：运行测试验证其通过**
 
 Run: `pnpm exec vitest run apps/desktop/tests/ipc-handler.spec.ts`
 
-Expected: PASS.
+预期：PASS。
 
-- [ ] **Step 9: Commit**
+- [ ] **步骤 9：提交**
 
 ```bash
 git add apps/desktop/src/ipc apps/desktop/tests
@@ -452,27 +452,27 @@ git commit -m "feat(desktop): ipc fetch bridge core with streaming framing"
 
 ---
 
-### Task 3: IpcApiClient in client-connection + seam
+### Task 3：client-connection 中的 IpcApiClient + 接缝
 
-**Files:**
-- Create: `packages/client/connection/src/client/ipc-api-client.ts` — `IpcApiClient extends AbstractApiClient`; `doFetch` runs an injected `ipcFetch` and reassembles the streamed body into a `Response` with a `ReadableStream`
-- Modify: `packages/client/connection/src/client/index.ts` — seam: pick `IpcApiClient` when the desktop bridge is present
-- Modify: `packages/client/connection/src/client/index.ts` — export the new carrier types
-- Test: `packages/client/connection/tests/ipc-api-client.spec.ts`
+**文件：**
+- 创建：`packages/client/connection/src/client/ipc-api-client.ts`——`IpcApiClient extends AbstractApiClient`；`doFetch` 运行注入的 `ipcFetch`，把流式 body 重组为带 `ReadableStream` 的 `Response`
+- 修改：`packages/client/connection/src/client/index.ts`——接缝：存在桌面桥时选择 `IpcApiClient`
+- 修改：`packages/client/connection/src/client/index.ts`——导出新载体类型
+- 测试：`packages/client/connection/tests/ipc-api-client.spec.ts`
 
-**Interfaces:**
-- Consumes: `AbstractApiClient`, `toFetchHandler` (apiproxy), `IpcStreamEvent` framing types from Task 2 (imported from `@deepseek-ai/dsh-desktop`? NO — connection cannot depend on the app; the framing types are duplicated minimal (JSON shape) and the transport is injected).
-- Produces:
+**接口：**
+- 消费：`AbstractApiClient`、`toFetchHandler`（apiproxy）、Task 2 的 `IpcStreamEvent` 分帧类型（从 `@deepseek-ai/dsh-desktop` 导入？不行——connection 不能依赖应用；分帧类型按最小化（JSON 形状）复制，传输层是注入的）。
+- 产出：
   - `export interface DesktopIpcTransport { request(req: { url: string; init?: { method?: string; headers?: Record<string,string>; body?: string } }): Promise<{ status: number; headers: Record<string,string>; events(): AsyncIterable<IpcStreamEvent> }> }`
   - `export class IpcApiClient extends AbstractApiClient { constructor(transport: DesktopIpcTransport) }`
   - `declare global { interface Window { __DSH_DESKTOP__?: { transport: DesktopIpcTransport } } }`
-  - `apply()` selects: `const api: IApiClient = fixtureClient ?? (desktopTransport ? new IpcApiClient(desktopTransport) : new WebApiClient())`
+  - `apply()` 选择：`const api: IApiClient = fixtureClient ?? (desktopTransport ? new IpcApiClient(desktopTransport) : new WebApiClient())`
 
-The renderer entry (Task 5) sets `window.__DSH_DESKTOP__ = { transport }` before `AppWebEntry.run()`; the transport wraps the preload `window.dsh` bridge. Because `IpcApiClient` sits in the connection package (not the app), it imports **no electron** — the transport is injected.
+渲染进程入口（Task 5）在 `AppWebEntry.run()` 之前设置 `window.__DSH_DESKTOP__ = { transport }`；传输层包装 preload 的 `window.dsh` 桥。因为 `IpcApiClient` 位于 connection 包（而非应用）中，它**不导入** electron——传输层是注入的。
 
-- [ ] **Step 1: Write the failing client test (protocol-level, against the real in-process handler)**
+- [ ] **步骤 1：写失败的客户端测试（协议级，针对真实进程内 handler）**
 
-The connection package must not import the app (`apps/desktop`) — dependency direction is apps → packages. The transport helper below therefore stands in for the IPC channel: it runs the real `toFetchHandler` fetch face (same one the desktop main process uses) and delivers the body as a single chunk, which still exercises the full `AbstractApiClient` protocol (envelope zod parsing, SSE `\n\n` framing decode, rpcId echo) on the client side. The multi-chunk streaming path is covered by Task 2's handler test.
+connection 包不得导入应用（`apps/desktop`）——依赖方向是 apps → packages。因此下面的传输辅助站在 IPC 通道的位置上：它运行真实的 `toFetchHandler` fetch 面（与桌面主进程用的是同一个），把 body 作为单一块交付，仍然在客户端侧完整演练 `AbstractApiClient` 协议（信封 zod 解析、SSE `\n\n` 分帧解码、rpcId 回显）。多块流式路径由 Task 2 的 handler 测试覆盖。
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -536,15 +536,15 @@ describe('IpcApiClient', () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [ ] **步骤 2：运行测试验证其失败**
 
 Run: `pnpm exec vitest run packages/client/connection/tests/ipc-api-client.spec.ts`
 
-Expected: FAIL — `IpcApiClient` not defined. (If `openHost`/`openMux` are not public on `IApiClient`, drop the second test and assert the unary round trip only — check `AbstractApiClient`'s stream surface during implementation.)
+预期：FAIL——`IpcApiClient` 未定义。（如果 `openHost`/`openMux` 不在 `IApiClient` 上公开，删掉第二个测试，只断言 unary 往返——实现时检查 `AbstractApiClient` 的流表面。）
 
-- [ ] **Step 3: Implement IpcApiClient**
+- [ ] **步骤 3：实现 IpcApiClient**
 
-`packages/client/connection/src/client/ipc-api-client.ts`:
+`packages/client/connection/src/client/ipc-api-client.ts`：
 
 ```ts
 /**
@@ -638,9 +638,9 @@ export class IpcApiClient extends AbstractApiClient {
 }
 ```
 
-- [ ] **Step 4: Wire the seam in the connection plugin**
+- [ ] **步骤 4：在 connection 插件中接线接缝**
 
-In `packages/client/connection/src/client/index.ts`, before `const api: IApiClient = ...`:
+在 `packages/client/connection/src/client/index.ts` 中，`const api: IApiClient = ...` 之前：
 
 ```ts
 declare global {
@@ -651,32 +651,32 @@ declare global {
 }
 ```
 
-and change the selection line:
+并把选择行改为：
 
 ```ts
   const desktopTransport = typeof window !== 'undefined' ? window.__DSH_DESKTOP__?.transport : undefined
   const api: IApiClient = fixtureClient ?? (desktopTransport !== undefined ? new IpcApiClient(desktopTransport) : new WebApiClient())
 ```
 
-Add the export in the same file's re-export block:
+在同一文件的再导出块中添加导出：
 
 ```ts
 export { IpcApiClient, type DesktopIpcTransport, type IpcStreamEvent } from './ipc-api-client.ts'
 ```
 
-- [ ] **Step 5: Run the connection package tests**
+- [ ] **步骤 5：运行 connection 包测试**
 
 Run: `pnpm exec vitest run packages/client/connection/tests/ipc-api-client.spec.ts`
 
-Expected: PASS.
+预期：PASS。
 
-- [ ] **Step 6: Typecheck the client aggregate**
+- [ ] **步骤 6：类型检查客户端聚合**
 
 Run: `pnpm exec tsc -b tsconfig.client.json --pretty false`
 
-Expected: no errors.
+预期：无错误。
 
-- [ ] **Step 7: Commit**
+- [ ] **步骤 7：提交**
 
 ```bash
 git add packages/client/connection/src/client/ipc-api-client.ts packages/client/connection/src/client/index.ts packages/client/connection/tests/ipc-api-client.spec.ts
@@ -685,25 +685,25 @@ git commit -m "feat(client-connection): ipc fetch carrier with desktop seam"
 
 ---
 
-### Task 4: Main-process host boot + IPC bridge wiring
+### Task 4：主进程宿主启动 + IPC 桥接线
 
-**Files:**
-- Create: `apps/desktop/cordis.yml` — desktop config: include the base plugin graph (same rows as the `web` profile minus webserver-only rows)
-- Create: `apps/desktop/src/main/host.ts` — `startDesktopHost()`: `boot('dsh-desktop', ...)` + returns `{ ctx, fetch }`; no electron import (unit-testable)
-- Create: `apps/desktop/src/main/ipc-bridge.ts` — `registerIpcFetchBridge(webContentsGetter, fetchFn)`; wires `ipcMain.handle('dsh:fetch', ...)` and pushes stream events via `webContents.send`
-- Modify: `apps/desktop/src/main/index.ts` — real `app.whenReady()` flow: boot host, register bridge, create window, `--smoke-test` fast path
-- Test: `apps/desktop/tests/host-boot.spec.ts` — keyless boot smoke (policy: boot through the Loader, mock only external services)
-- Test: `apps/desktop/tests/ipc-bridge.spec.ts` — bridge framing with a fake `ipcMain`/`webContents` pair
+**文件：**
+- 创建：`apps/desktop/cordis.yml`——桌面配置：包含基础插件图（与 `web` profile 相同的行，去掉仅 webserver 的行）
+- 创建：`apps/desktop/src/main/host.ts`——`startDesktopHost()`：`boot('dsh-desktop', ...)` + 返回 `{ ctx, fetch }`；无 electron 导入（可单元测试）
+- 创建：`apps/desktop/src/main/ipc-bridge.ts`——`registerIpcFetchBridge(webContentsGetter, fetchFn)`；接线 `ipcMain.handle('dsh:fetch', ...)` 并通过 `webContents.send` 推送流事件
+- 修改：`apps/desktop/src/main/index.ts`——真正的 `app.whenReady()` 流程：启动宿主、注册桥、创建窗口、`--smoke-test` 快路径
+- 测试：`apps/desktop/tests/host-boot.spec.ts`——无 key 启动冒烟（策略：经 Loader 启动，只 mock 外部服务）
+- 测试：`apps/desktop/tests/ipc-bridge.spec.ts`——用假的 `ipcMain`/`webContents` 对测桥分帧
 
-**Interfaces:**
-- Consumes: `boot()` from `@deepseek-ai/dsh-app-boot` (`boot(binName, absoluteConfigPath, patches?, prepare?, bareModuleBaseUrl?) => Promise<Context>`), `createApiProxy` + `toFetchHandler` from `@deepseek-ai/dsh-host-apiproxy`, Task 2's `createIpcFetchHandler`. Persistence redirection: `DSH_HOME` env (`DSH_HOME_ENV` in `@deepseek-ai/dsh-home-paths`, read with highest precedence by `resolveDshHome`) — the desktop main sets `process.env.DSH_HOME` before boot so `dshHomePath('storages')` and friends land under Electron's userData.
-- Produces:
+**接口：**
+- 消费：`@deepseek-ai/dsh-app-boot` 的 `boot()`（`boot(binName, absoluteConfigPath, patches?, prepare?, bareModuleBaseUrl?) => Promise<Context>`）、`@deepseek-ai/dsh-host-apiproxy` 的 `createApiProxy` + `toFetchHandler`、Task 2 的 `createIpcFetchHandler`。持久化重定向：`DSH_HOME` 环境变量（`@deepseek-ai/dsh-home-paths` 的 `DSH_HOME_ENV`，`resolveDshHome` 以最高优先级读取）——桌面主进程在启动前设置 `process.env.DSH_HOME`，使 `dshHomePath('storages')` 等落在 Electron 的 userData 下。
+- 产出：
   - `export async function startDesktopHost(): Promise<{ ctx: Context; fetch: { fetch: typeof fetch } }>`
   - `export function registerIpcFetchBridge(getSender: () => { send(channel: string, payload: unknown): void }, fetchFn: IpcFetchFn, ipcHandle: (channel: string, handler: (event: unknown, req: IpcFetchRequest) => Promise<IpcFetchResponse>) => void): () => void`
 
-- [ ] **Step 1: Write the desktop cordis config**
+- [ ] **步骤 1：写桌面 cordis 配置**
 
-`apps/desktop/cordis.yml` — mirror the `web` profile's base rows (see `packages/boot/app-boot/src/profile.ts` `web: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']`); desktop substitutes its own surface, so it includes base rows only and its own host rows:
+`apps/desktop/cordis.yml`——镜像 `web` profile 的基础行（见 `packages/boot/app-boot/src/profile.ts` `web: ['@deepseek-ai/dsh-base', '@deepseek-ai/dsh-web-app']`）；桌面用自己的表面替代，因此只包含基础行和自己的宿主行：
 
 ```yaml
 # The dsh-desktop app config: the base harness graph plus desktop host rows.
@@ -740,9 +740,9 @@ plugins:
     name: '@deepseek-ai/dsh-host-apiproxy'
 ```
 
-Verify against `packages/bundle/web-app/cordis.patch.yml` and `packages/bundle/base/cordis.patch.yml` during implementation: keep every host row the web profile has that does not depend on `webServer` (rows like `code-runtime`, `session-query-sqlite`, `tools` mode are inherited from base). Drop `hmr` (the `disabled: true` row from web-app patch can be copied) and any `webStartup`/`webRuntime` rows.
+实现时对照 `packages/bundle/web-app/cordis.patch.yml` 和 `packages/bundle/base/cordis.patch.yml` 核实：保留 web profile 拥有的、不依赖 `webServer` 的每个宿主行（`code-runtime`、`session-query-sqlite`、`tools` mode 等行从 base 继承）。删除 `hmr`（可复制 web-app patch 的 `disabled: true` 行）以及任何 `webStartup`/`webRuntime` 行。
 
-- [ ] **Step 2: Write the failing host boot test (keyless)**
+- [ ] **步骤 2：写失败的宿主启动测试（无 key）**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -765,15 +765,15 @@ describe('desktop host', () => {
 })
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **步骤 3：运行测试验证其失败**
 
 Run: `pnpm exec vitest run apps/desktop/tests/host-boot.spec.ts`
 
-Expected: FAIL — `startDesktopHost` not defined.
+预期：FAIL——`startDesktopHost` 未定义。
 
-- [ ] **Step 4: Implement startDesktopHost**
+- [ ] **步骤 4：实现 startDesktopHost**
 
-`apps/desktop/src/main/host.ts`:
+`apps/desktop/src/main/host.ts`：
 
 ```ts
 /**
@@ -804,15 +804,15 @@ export async function startDesktopHost(): Promise<DesktopHost> {
 }
 ```
 
-Note: `apiProxy` is a declaration-merged `ctx` property (`packages/host/apiproxy/src/index.ts` provides `ctx.apiProxy`); the test asserts the default `DSH_HOME` resolution only. In the electron entry (Step 10), set `process.env.DSH_HOME = join(app.getPath('userData'), 'dsh')` before calling `startDesktopHost()`.
+注意：`apiProxy` 是声明合并的 `ctx` 属性（`packages/host/apiproxy/src/index.ts` 提供 `ctx.apiProxy`）；测试只断言默认 `DSH_HOME` 解析。在 electron 入口（步骤 10）中，调用 `startDesktopHost()` 之前设置 `process.env.DSH_HOME = join(app.getPath('userData'), 'dsh')`。
 
-- [ ] **Step 5: Run host boot test to verify it passes**
+- [ ] **步骤 5：运行宿主启动测试验证其通过**
 
 Run: `pnpm exec vitest run apps/desktop/tests/host-boot.spec.ts`
 
-Expected: PASS (boots the full tree; base bundles must be built: run `pnpm run build:lib` first if it fails on missing `lib/`).
+预期：PASS（启动完整树；base bundle 必须已构建：若因缺 `lib/` 失败，先运行 `pnpm run build:lib`）。
 
-- [ ] **Step 6: Write the failing bridge test (fake ipc pair)**
+- [ ] **步骤 6：写失败的桥测试（假 ipc 对）**
 
 ```ts
 import { describe, expect, it } from 'vitest'
@@ -834,15 +834,15 @@ describe('ipc bridge', () => {
 })
 ```
 
-- [ ] **Step 7: Run test to verify it fails**
+- [ ] **步骤 7：运行测试验证其失败**
 
 Run: `pnpm exec vitest run apps/desktop/tests/ipc-bridge.spec.ts`
 
-Expected: FAIL — `registerIpcFetchBridge` not defined.
+预期：FAIL——`registerIpcFetchBridge` 未定义。
 
-- [ ] **Step 8: Implement the bridge**
+- [ ] **步骤 8：实现桥**
 
-`apps/desktop/src/main/ipc-bridge.ts`:
+`apps/desktop/src/main/ipc-bridge.ts`：
 
 ```ts
 /**
@@ -872,15 +872,15 @@ export function registerIpcFetchBridge(
 }
 ```
 
-- [ ] **Step 9: Run bridge test to verify it passes**
+- [ ] **步骤 9：运行桥测试验证其通过**
 
 Run: `pnpm exec vitest run apps/desktop/tests/ipc-bridge.spec.ts`
 
-Expected: PASS.
+预期：PASS。
 
-- [ ] **Step 10: Real main-process entry with smoke-test fast path**
+- [ ] **步骤 10：带 smoke-test 快路径的真正主进程入口**
 
-Replace the placeholder `apps/desktop/src/main/index.ts`:
+替换占位的 `apps/desktop/src/main/index.ts`：
 
 ```ts
 import { app, BrowserWindow, ipcMain } from 'electron'
@@ -931,15 +931,15 @@ void app.whenReady().then(async () => {
 })
 ```
 
-- [ ] **Step 11: Build and commit**
+- [ ] **步骤 11：构建并提交**
 
 Run: `pnpm --filter @deepseek-ai/dsh-desktop run build`
 
-Expected: builds clean.
+预期：构建干净。
 
 Run: `pnpm exec vitest run apps/desktop/tests`
 
-Expected: all pass.
+预期：全部通过。
 
 ```bash
 git add apps/desktop/cordis.yml apps/desktop/src/main
@@ -948,28 +948,28 @@ git commit -m "feat(desktop): host boot and ipc bridge wiring in main process"
 
 ---
 
-### Task 5: Preload bridge + renderer boot
+### Task 5：preload 桥 + 渲染进程启动
 
-**Files:**
-- Create: `apps/desktop/src/preload/index.ts` (real implementation)
-- Create: `apps/desktop/src/renderer/main.tsx` (real implementation)
-- Modify: `apps/desktop/src/preload/index.ts` → exposes `window.dsh`:
-  - `window.dsh.fetchRequest(req)` — `ipcRenderer.invoke('dsh:fetch', req)` returns `{status, headers, streamId}`-shaped envelope (actually the `IpcFetchResponse` from Task 2)
-  - `window.dsh.onStream(callback)` — subscribes to `dsh:stream` events
-  - `window.dsh.loadBundle(url)` — reads a bundle file from disk via the main process (`ipcRenderer.invoke('dsh:load-bundle', url)`)
-- Modify: `apps/desktop/src/main/index.ts` — register `dsh:load-bundle` handler (reads the bundle file; resolution maps `/plugins/<id>/client.js`-style URLs to the built `lib/client.js` under the workspace package dirs)
-- Modify: `packages/client/web/src/boot.tsx`? — NO: `AppWebEntry` already accepts `BootSeams` with `loadBundle`; no package change needed.
+**文件：**
+- 创建：`apps/desktop/src/preload/index.ts`（真正实现）
+- 创建：`apps/desktop/src/renderer/main.tsx`（真正实现）
+- 修改：`apps/desktop/src/preload/index.ts` → 暴露 `window.dsh`：
+  - `window.dsh.fetchRequest(req)`——`ipcRenderer.invoke('dsh:fetch', req)` 返回 `{status, headers, streamId}` 形信封（实际是 Task 2 的 `IpcFetchResponse`）
+  - `window.dsh.onStream(callback)`——订阅 `dsh:stream` 事件
+  - `window.dsh.loadBundle(url)`——经主进程从磁盘读取 bundle 文件（`ipcRenderer.invoke('dsh:load-bundle', url)`）
+- 修改：`apps/desktop/src/main/index.ts`——注册 `dsh:load-bundle` handler（读取 bundle 文件；解析把 `/plugins/<id>/client.js` 风格 url 映射到 workspace 包目录下构建后的 `lib/client.js`）
+- 修改：`packages/client/web/src/boot.tsx`？——不：`AppWebEntry` 已接受带 `loadBundle` 的 `BootSeams`；无需包改动。
 
-**Interfaces:**
-- Consumes: `AppWebEntry(el, seams)` from `@deepseek-ai/dsh-client-web`; `BootSeams = { loadBundle(url: string): Promise<void> }`; `parseBootManifest` shape (`BootManifest` with `modules`/`plugins` rows, each `{ id, url, rev, immediately? }`).
-- Produces:
-  - `window.__DSH_BOOT__: BootManifest` set by the renderer entry from a `dsh:boot-manifest` invoke.
-  - `window.dsh` bridge with `fetchRequest`, `onStream`, `loadBundle`.
-  - Renderer `main.tsx`: fetch manifest → build `IpcApiClient` transport over `window.dsh` → set `window.__DSH_DESKTOP__` → set `window.__DSH_BOOT__` → `new AppWebEntry(el, { loadBundle }).run()`.
+**接口：**
+- 消费：`@deepseek-ai/dsh-client-web` 的 `AppWebEntry(el, seams)`；`BootSeams = { loadBundle(url: string): Promise<void> }`；`parseBootManifest` 形状（`BootManifest`，含 `modules`/`plugins` 行，每行 `{ id, url, rev, immediately? }`）。
+- 产出：
+  - 渲染进程入口通过 `dsh:boot-manifest` invoke 设置 `window.__DSH_BOOT__: BootManifest`。
+  - `window.dsh` 桥，含 `fetchRequest`、`onStream`、`loadBundle`。
+  - 渲染进程 `main.tsx`：拉取 manifest → 基于 `window.dsh` 构建 `IpcApiClient` 传输层 → 设置 `window.__DSH_DESKTOP__` → 设置 `window.__DSH_BOOT__` → `new AppWebEntry(el, { loadBundle }).run()`。
 
-- [ ] **Step 1: Implement the preload bridge**
+- [ ] **步骤 1：实现 preload 桥**
 
-`apps/desktop/src/preload/index.ts`:
+`apps/desktop/src/preload/index.ts`：
 
 ```ts
 import { contextBridge, ipcRenderer } from 'electron'
@@ -999,9 +999,9 @@ const bridge: DesktopBridge = {
 contextBridge.exposeInMainWorld('dsh', bridge)
 ```
 
-- [ ] **Step 2: Register the two new main-process handlers**
+- [ ] **步骤 2：注册两个新的主进程 handler**
 
-In `apps/desktop/src/main/index.ts`, inside `whenReady`:
+在 `apps/desktop/src/main/index.ts` 的 `whenReady` 内：
 
 ```ts
 import { readFile } from 'node:fs/promises'
@@ -1030,9 +1030,9 @@ ipcMain.handle('dsh:boot-manifest', async (): Promise<unknown> => {
 })
 ```
 
-- [ ] **Step 3: Implement the manifest provider**
+- [ ] **步骤 3：实现 manifest 提供方**
 
-Create `apps/desktop/src/main/manifest.ts`:
+创建 `apps/desktop/src/main/manifest.ts`：
 
 ```ts
 /**
@@ -1089,15 +1089,15 @@ export function buildBootManifest(root = workspaceRoot): DesktopBootManifest {
 }
 ```
 
-Wire it in `index.ts`:
+在 `index.ts` 中接线：
 
 ```ts
 ipcMain.handle('dsh:boot-manifest', async (): Promise<unknown> => buildBootManifest())
 ```
 
-- [ ] **Step 4: Implement the renderer entry**
+- [ ] **步骤 4：实现渲染进程入口**
 
-`apps/desktop/src/renderer/main.tsx`:
+`apps/desktop/src/renderer/main.tsx`：
 
 ```tsx
 /**
@@ -1190,13 +1190,13 @@ function evaluateBundle(url: string, source: string): Promise<void> {
 void main()
 ```
 
-- [ ] **Step 5: Update the placeholder smoke-test reference and build**
+- [ ] **步骤 5：更新占位 smoke-test 引用并构建**
 
 Run: `pnpm --filter @deepseek-ai/dsh-desktop run build`
 
-Expected: builds clean (renderer typechecks against the new bridge types).
+预期：构建干净（渲染进程针对新桥类型做类型检查）。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add apps/desktop/src/preload apps/desktop/src/renderer apps/desktop/src/main/manifest.ts apps/desktop/src/main/index.ts
@@ -1205,18 +1205,18 @@ git commit -m "feat(desktop): preload bridge and renderer boot over the shell"
 
 ---
 
-### Task 6: electron-builder packaging config + icon
+### Task 6：electron-builder 打包配置 + 图标
 
-**Files:**
-- Create: `apps/desktop/electron-builder.yml`
-- Create: `apps/desktop/build/icon.png` (generated; electron-builder converts to icns/ico automatically)
-- Create: `apps/desktop/scripts/generate-icon.mjs` (dependency-free PNG encoder using node zlib)
-- Modify: `apps/desktop/package.json` — add `dist` scripts, `build.extraResources`? (see yml), `postinstall` electron-builder install-app-deps
+**文件：**
+- 创建：`apps/desktop/electron-builder.yml`
+- 创建：`apps/desktop/build/icon.png`（生成；electron-builder 自动转换为 icns/ico）
+- 创建：`apps/desktop/scripts/generate-icon.mjs`（无依赖 PNG 编码器，用 node zlib）
+- 修改：`apps/desktop/package.json`——添加 `dist` 脚本、`build.extraResources`？（见 yml）、`postinstall` electron-builder install-app-deps
 
-**Interfaces:**
-- Produces: `electron-builder` config producing `dist-installers/` with `dmg` + `zip` (mac) and NSIS `exe` (win); icon files; packaging smoke target `dist-installers/<app>-unpacked` via `--dir`.
+**接口：**
+- 产出：`electron-builder` 配置，在 `dist-installers/` 产出 `dmg` + `zip`（mac）和 NSIS `exe`（win）；图标文件；经 `--dir` 的打包冒烟目标 `dist-installers/<app>-unpacked`。
 
-- [ ] **Step 1: Write electron-builder.yml**
+- [ ] **步骤 1：写 electron-builder.yml**
 
 ```yaml
 appId: ai.deepseek.dsh
@@ -1252,35 +1252,35 @@ electronDownload:
   cache: ~/.cache/electron
 ```
 
-Note: `files` must also include the deployed node_modules closure — in CI, build the closure with `pnpm --filter @deepseek-ai/dsh-desktop deploy dist-app/prod` first, then add `dist-app/prod/**/*` to `files` (verify electron-builder includes node_modules automatically when present in `files`; adjust `files` accordingly during implementation). Workspace symlinks in node_modules are resolved by the deploy step.
+注意：`files` 还必须包含部署后的 node_modules 闭包——在 CI 中先用 `pnpm --filter @deepseek-ai/dsh-desktop deploy dist-app/prod` 构建闭包，再把 `dist-app/prod/**/*` 加入 `files`（实现时核实当 `files` 中存在 node_modules 时 electron-builder 是否自动包含；必要时相应调整 `files`）。node_modules 中的 workspace 符号链接由 deploy 步骤解析。
 
-- [ ] **Step 2: Write the icon generator (dependency-free)**
+- [ ] **步骤 2：写图标生成器（无依赖）**
 
-`apps/desktop/scripts/generate-icon.mjs` — a minimal PNG writer using node `zlib` (no canvas dependency): render a 1024×1024 RGBA buffer with a simple two-tone rounded square + "D" block letter approximation, then `zlib.deflateSync` the raw scanlines into a PNG with IDAT. Output `apps/desktop/build/icon.png`.
+`apps/desktop/scripts/generate-icon.mjs`——用 node `zlib` 的最小 PNG 写入器（无 canvas 依赖）：渲染一个 1024×1024 RGBA 缓冲，双色圆角方块 + "D" 字形近似，再用 `zlib.deflateSync` 把原始扫描线压缩进带 IDAT 的 PNG。输出 `apps/desktop/build/icon.png`。
 
-- [ ] **Step 3: Generate and verify the icon**
+- [ ] **步骤 3：生成并核实图标**
 
 Run: `node apps/desktop/scripts/generate-icon.mjs`
 
 Run: `file apps/desktop/build/icon.png`
 
-Expected: `PNG image data, 1024 x 1024`.
+预期：`PNG image data, 1024 x 1024`。
 
-- [ ] **Step 4: Local packaging check (macOS)**
+- [ ] **步骤 4：本地打包检查（macOS）**
 
 Run: `pnpm --filter @deepseek-ai/dsh-desktop run build`
 
 Run: `cd apps/desktop && pnpm exec electron-builder --dir --mac`
 
-Expected: `dist-installers/mac*/DeepSeek Harness.app` exists (unpacked, unsigned).
+预期：`dist-installers/mac*/DeepSeek Harness.app` 存在（未打包解压、未签名）。
 
-- [ ] **Step 5: Smoke-test the packaged app**
+- [ ] **步骤 5：对打包应用做冒烟测试**
 
 Run: `"dist-installers/mac-arm64/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness" --smoke-test`
 
-Expected: prints `dsh-desktop smoke OK` and exits 0.
+预期：打印 `dsh-desktop smoke OK` 并以 0 退出。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add apps/desktop/electron-builder.yml apps/desktop/build apps/desktop/scripts apps/desktop/package.json
@@ -1289,15 +1289,15 @@ git commit -m "build(desktop): electron-builder packaging config and icon"
 
 ---
 
-### Task 7: GitHub Actions workflow — build and release installers
+### Task 7：GitHub Actions 工作流——构建并发布安装程序
 
-**Files:**
-- Create: `.github/workflows/desktop-release.yml`
+**文件：**
+- 创建：`.github/workflows/desktop-release.yml`
 
-**Interfaces:**
-- Consumes: Task 6's electron-builder config; the repo's established CI patterns (`actions/checkout@v6`, `pnpm/action-setup@v4`, `actions/setup-node@v6` with node 24 + pnpm cache, `pnpm install --frozen-lockfile`, `DSH_TELEMETRY_DISABLED=1`).
+**接口：**
+- 消费：Task 6 的 electron-builder 配置；仓库既有 CI 模式（`actions/checkout@v6`、`pnpm/action-setup@v4`、`actions/setup-node@v6` 配 node 24 + pnpm 缓存、`pnpm install --frozen-lockfile`、`DSH_TELEMETRY_DISABLED=1`）。
 
-- [ ] **Step 1: Write the workflow**
+- [ ] **步骤 1：写工作流**
 
 ```yaml
 name: Desktop release
@@ -1413,15 +1413,15 @@ jobs:
             --title "DeepSeek Harness Desktop $TAG" --generate-notes
 ```
 
-Note: if the `macos-13` runner has been retired by GitHub when this lands, drop the `macos-x64` matrix row (keep arm64 + Windows) and note it in the PR.
+注意：如果落地时 GitHub 已退役 `macos-13` runner，删除 `macos-x64` 矩阵行（保留 arm64 + Windows）并在 PR 中注明。
 
-- [ ] **Step 2: Validate the workflow syntax**
+- [ ] **步骤 2：验证工作流语法**
 
-Run: `npx action-validator .github/workflows/desktop-release.yml` (or `python -c` YAML parse fallback if action-validator is unavailable)
+Run: `npx action-validator .github/workflows/desktop-release.yml`（或 action-validator 不可用时用 `python -c` YAML 解析回退）
 
-Expected: valid.
+预期：有效。
 
-- [ ] **Step 3: Commit**
+- [ ] **步骤 3：提交**
 
 ```bash
 git add .github/workflows/desktop-release.yml
@@ -1430,35 +1430,35 @@ git commit -m "ci(desktop): build and release workflow for desktop installers"
 
 ---
 
-### Task 8: Agent Note + README
+### Task 8：Agent Note + README
 
-**Files:**
-- Create: `.agents/notes/implemented/architecture/2026-08-14-electron-desktop-shell.md` (+ `.zh.md`)
-- Create: `apps/desktop/README.md` (+ `.zh.md` per repo bilingual convention)
-- Modify: `docs/superpowers/specs/2026-08-14-electron-desktop-design.md` (status → implemented, link the note)
+**文件：**
+- 创建：`.agents/notes/implemented/architecture/2026-08-14-electron-desktop-shell.md`（+ `.zh.md`）
+- 创建：`apps/desktop/README.md`（+ 按仓库双语约定的 `.zh.md`）
+- 修改：`docs/superpowers/specs/2026-08-14-electron-desktop-design.md`（status → implemented，链接笔记）
 
-**Interfaces:**
-- Consumes: the shipped code from Tasks 1–7; the Agent Note format rules (`verify-agent-note-format` gates structure).
+**接口：**
+- 消费：Task 1–7 交付的代码；Agent Note 格式规则（`verify-agent-note-format` 门禁结构）。
 
-- [ ] **Step 1: Write the Agent Note**
+- [ ] **步骤 1：写 Agent Note**
 
-`.agents/notes/implemented/architecture/2026-08-14-electron-desktop-shell.md` — decisions: IPC fetch carrier as the transport aspect (`doFetch` subclass, protocol untouched); main-process host via `dsh-app-boot.boot()` without webserver; `ctx.apiProxy` face (`toFetchHandler`); `client-connection` seam (`window.__DSH_DESKTOP__`); manifest + bundle loading over IPC; unsigned packaging v1. Follow the format of `2026-07-19-gui-layering-and-rpc-protocol.md` (problem → decision → consequences). Write the `.zh.md` mirror.
+`.agents/notes/implemented/architecture/2026-08-14-electron-desktop-shell.md`——决策：IPC fetch 载体作为传输方面（`doFetch` 子类，协议不变）；主进程宿主经 `dsh-app-boot.boot()` 且无 webserver；`ctx.apiProxy` 面（`toFetchHandler`）；`client-connection` 接缝（`window.__DSH_DESKTOP__`）；manifest + bundle 经 IPC 加载；v1 未签名打包。遵循 `2026-07-19-gui-layering-and-rpc-protocol.md` 的格式（问题 → 决策 → 结果）。写 `.zh.md` 镜像。
 
-- [ ] **Step 2: Write the app README**
+- [ ] **步骤 2：写应用 README**
 
-`apps/desktop/README.md` — what it is, architecture (3 processes + IPC bridge), build instructions (`pnpm run build:lib`, desktop build, `--dir` packaging), smoke test, signing status, known limitations (unsigned Gatekeeper/SmartScreen, no auto-update yet). `.zh.md` mirror per repo bilingual policy.
+`apps/desktop/README.md`——它是什么、架构（3 个进程 + IPC 桥）、构建说明（`pnpm run build:lib`、桌面构建、`--dir` 打包）、冒烟测试、签名状态、已知限制（未签名 Gatekeeper/SmartScreen、尚无自动更新）。按仓库双语政策写 `.zh.md` 镜像。
 
-- [ ] **Step 3: Update the spec status**
+- [ ] **步骤 3：更新 spec 状态**
 
-In `docs/superpowers/specs/2026-08-14-electron-desktop-design.md`, change `Status: approved` to `Status: implemented` and add a link to the Agent Note.
+在 `docs/superpowers/specs/2026-08-14-electron-desktop-design.md` 中，把 `Status: approved` 改为 `Status: implemented` 并添加指向 Agent Note 的链接。
 
-- [ ] **Step 4: Verify gates**
+- [ ] **步骤 4：验证门禁**
 
-Run: `pnpm exec tsx scripts/verify-agent-note-format.ts` (or the repo's agent-note verification script)
+Run: `pnpm exec tsx scripts/verify-agent-note-format.ts`（或仓库的 agent-note 验证脚本）
 
-Expected: passes.
+预期：通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add .agents/notes/implemented/architecture/2026-08-14-electron-desktop-shell.md .agents/notes/implemented/architecture/2026-08-14-electron-desktop-shell.zh.md apps/desktop/README.md apps/desktop/README.zh.md docs/superpowers/specs/2026-08-14-electron-desktop-design.md
@@ -1467,8 +1467,8 @@ git commit -m "docs(desktop): agent note and README for the electron desktop she
 
 ---
 
-## Self-Review Notes
+## 自审笔记
 
-- **Spec coverage:** every spec section maps to a task — form/IPC carrier → Tasks 2–5; host assembly without webserver → Task 4; packaging (dmg/zip/NSIS, unsigned, node-pty rebuild via npmRebuild) → Task 6; GitHub Actions matrix + dispatch/tag triggers + telemetry env → Task 7; Agent Note + README → Task 8; tsconfig paths rule → Task 1; out-of-scope items (signing, auto-update, Linux) are documented in Task 8's README.
-- **Environment facts verified during planning (not placeholders):** `defaultLoadBundle` = classic async script element (Task 5 mirrors it with inline script); `DSH_HOME_ENV`/`resolveDshHome` precedence (Task 4 redirects via env before boot); `boot()` returns `Context` with `ctx.apiProxy` provided by the apiproxy gateway; `loadBundle(url: string) => Promise<void>` seam; connection package must not import the app (Task 3 transport helper stands in for the channel).
-- **Deferred environment fact:** `macos-13` runner availability for the x64 macOS matrix row (workflow comment documents the drop-it fallback).
+- **Spec 覆盖：** 每个 spec 小节都映射到一个任务——形态/IPC 载体 → Task 2–5；无 webserver 的宿主装配 → Task 4；打包（dmg/zip/NSIS、未签名、经 npmRebuild 重建 node-pty）→ Task 6；GitHub Actions 矩阵 + dispatch/标签触发器 + 遥测 env → Task 7；Agent Note + README → Task 8；tsconfig paths 规则 → Task 1；超出范围项（签名、自动更新、Linux）记录在 Task 8 的 README。
+- **规划期间核实过的环境事实（非占位）：** `defaultLoadBundle` = 经典 async script 元素（Task 5 用内联脚本镜像它）；`DSH_HOME_ENV`/`resolveDshHome` 优先级（Task 4 在启动前经 env 重定向）；`boot()` 返回带 `ctx.apiProxy` 的 `Context`（由 apiproxy 网关提供）；`loadBundle(url: string) => Promise<void>` 接缝；connection 包不得导入应用（Task 3 的传输辅助站在通道的位置上）。
+- **延后的环境事实：** x64 macOS 矩阵行的 `macos-13` runner 可用性（工作流注释记录删除回退方案）。
