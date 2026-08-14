@@ -1,0 +1,112 @@
+name: Desktop release
+
+# Manual dispatch builds installers and uploads artifacts; a desktop-v* tag
+# additionally publishes a GitHub Release with the installers as assets.
+# Unsigned in v1: CSC_IDENTITY_AUTO_DISCOVERY=false and mac.identity: null.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'desktop-v*'
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  DSH_TELEMETRY_DISABLED: '1'
+  CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: macos-arm64
+            runner: macos-latest
+            args: '--mac --x64=false --arm64=true'
+          # macos-x64 dropped: GitHub retired the macos-13 (Intel) runner in
+          # December 2025; arm64 + Windows cover the v1 installer set.
+          - target: windows-x64
+            runner: windows-latest
+            args: '--win'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install (immutable)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build libraries
+        run: pnpm run build:lib
+
+      - name: Build desktop app
+        run: pnpm --filter @deepseek-ai/dsh-desktop run build
+
+      # No `pnpm deploy dist-app/prod` closure step: electron-builder.yml
+      # files points at apps/desktop/dist, not a deployed closure, and
+      # packaging the workspace node_modules directly is verified locally —
+      # electron-builder resolves the pnpm symlinks, prunes devDependencies,
+      # and npmRebuilds native modules.
+      - name: Package installers
+        working-directory: apps/desktop
+        run: pnpm exec electron-builder --publish never ${{ matrix.args }}
+
+      - name: Smoke-test packaged app
+        shell: bash
+        run: |
+          case "${{ matrix.target }}" in
+            macos-*)
+              APP="$(find apps/desktop/dist-installers -type d -name 'DeepSeek Harness.app' | head -n 1)"
+              "$APP/Contents/MacOS/DeepSeek Harness" --smoke-test
+              ;;
+            windows-x64)
+              "apps/desktop/dist-installers/win-unpacked/DeepSeek Harness.exe" --smoke-test
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dsh-desktop-${{ matrix.target }}
+          path: |
+            apps/desktop/dist-installers/*.dmg
+            apps/desktop/dist-installers/*.zip
+            apps/desktop/dist-installers/*.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist-installers
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" \
+            dist-installers/*.dmg dist-installers/*.zip dist-installers/*.exe \
+            --title "DeepSeek Harness Desktop $TAG" --generate-notes
