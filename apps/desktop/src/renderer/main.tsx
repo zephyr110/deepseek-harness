@@ -40,11 +40,13 @@ async function main(): Promise<void> {
     },
   })
   await entry.run()
-  // Smoke signal: sent only after the boot settled — the packaged --smoke-test
-  // run waits for it, so a white or dead renderer (boot never reaching
-  // AppWebEntry.run, e.g. missing script assets) times out instead of passing
-  // on did-finish-load.
-  bridge.booted(manifest.entries.length)
+  // Smoke signal: sent after the boot chain settled. The second argument
+  // carries the shell's own failure report, so a boot that settled on the
+  // error page (e.g. an entry failed to activate) reports failure instead of
+  // a false OK. The packaged --smoke-test run waits for this signal, so a
+  // white or dead renderer (boot never reaching AppWebEntry.run, e.g. missing
+  // script assets) times out instead of passing on did-finish-load.
+  bridge.booted(manifest.entries.length, entry.getError() === undefined)
 }
 
 /**
@@ -65,4 +67,14 @@ function evaluateBundle(_url: string, source: string): Promise<void> {
   return Promise.resolve()
 }
 
-void main()
+void main().catch((error: unknown) => {
+  // Boot failures before AppWebEntry.run (missing bridge, manifest/loadBundle
+  // rejections) would otherwise be a silent white window; surface them in the
+  // root element so the user sees the failure instead of nothing.
+  const el = document.getElementById('root')
+  if (el !== null) {
+    el.textContent = `DeepSeek Harness failed to start: ${error instanceof Error ? error.message : String(error)}`
+  } else {
+    console.error(error)
+  }
+})

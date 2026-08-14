@@ -10,18 +10,26 @@
  * a listener installed after the reply resolves would drop those events.
  * Events carry the requestId the transport minted (the handler echoes it),
  * not the streamId, so filtering compares against the minted requestId.
- * Termination: the events iterator unsubscribes before yielding the end/error
- * event and stops after it, so a response releases its listener even when the
- * consumer (IpcApiClient's pull loop) stops resuming the generator at a
- * terminal event instead of driving it to completion.
+ * Termination: the mailbox listener unsubscribes itself the moment it
+ * observes a terminal event — independent of whether the events iterator is
+ * ever driven (abort, or a non-2xx response whose body the base client never
+ * reads, leave the iterator untouched, so the listener cannot rely on it) —
+ * and the iterator also unsubscribes before yielding the terminal event.
+ * Delivery is push-based: the listener wakes a parked waiter instead of
+ * polling, so an idle stream costs nothing and events land without the
+ * poll-interval delay.
  */
 import type { DesktopBridge } from '../preload/index.ts'
 import type { IpcFetchRequest } from '../ipc/handler.ts'
 import type { IpcStreamEvent } from '@deepseek-ai/dsh-client-connection/client'
 import type { DesktopIpcTransport } from '@deepseek-ai/dsh-client-connection/client'
 
-/** Poll interval between listener-queue drains while a stream stays open. */
-const POLL_INTERVAL_MS = 5
+/** One in-flight stream's mailbox: ordered events plus a parked waiter. */
+interface Mailbox {
+  events: IpcStreamEvent[]
+  wake: (() => void) | undefined
+  unsubscribed: boolean
+}
 
 /**
  * Build the desktop IPC transport over the preload bridge.
@@ -32,19 +40,25 @@ export function createDesktopTransport(bridge: Pick<DesktopBridge, 'fetchRequest
   return {
     async request(req) {
       const requestId = crypto.randomUUID()
-      const events: IpcStreamEvent[] = []
+      const mailbox: Mailbox = { events: [], wake: undefined, unsubscribed: false }
       const removeListener = bridge.onStream((event) => {
-        // Stream events echo the requestId the transport minted; events from
-        // other in-flight requests are ignored by this stream's mailbox.
-        if (event.requestId === requestId) events.push(event)
+        // Only this stream's events reach the mailbox; the requestId filter
+        // rides every event from the main process.
+        if (event.requestId !== requestId) return
+        const terminal = event.kind === 'end' || event.kind === 'error'
+        if (terminal && !mailbox.unsubscribed) {
+          // Release the listener at the source: consumers that abandon the
+          // response (abort, non-2xx read as failure before the body) never
+          // drive the iterator, so this is the only cleanup that always runs.
+          mailbox.unsubscribed = true
+          removeListener()
+        }
+        mailbox.events.push(event)
+        mailbox.wake?.()
       })
-      // Idempotent: the generator unsubscribes before yielding a terminal
-      // event (consumers stop resuming the generator there, so the finally
-      // would never run) and again in the finally as the return()/GC fallback.
-      let unsubscribed = false
       const unsubscribe = (): void => {
-        if (unsubscribed) return
-        unsubscribed = true
+        if (mailbox.unsubscribed) return
+        mailbox.unsubscribed = true
         removeListener()
       }
       let response: Awaited<ReturnType<DesktopBridge['fetchRequest']>>
@@ -60,9 +74,12 @@ export function createDesktopTransport(bridge: Pick<DesktopBridge, 'fetchRequest
         events: async function* () {
           try {
             for (;;) {
-              const event = events.shift()
+              const event = mailbox.events.shift()
               if (event === undefined) {
-                await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
+                // Park until the listener delivers an event; the wake call
+                // resumes this exact iteration.
+                await new Promise<void>((resolve) => { mailbox.wake = resolve })
+                mailbox.wake = undefined
                 continue
               }
               if (event.kind === 'end' || event.kind === 'error') {
@@ -75,6 +92,13 @@ export function createDesktopTransport(bridge: Pick<DesktopBridge, 'fetchRequest
           } finally {
             unsubscribe()
           }
+        },
+        cancel: () => {
+          // Stops the listener and drops the mailbox; the main process keeps
+          // streaming until the body ends (no IPC cancel channel), and its
+          // terminal-event cleanup releases the entry when the stream finishes.
+          unsubscribe()
+          mailbox.events.length = 0
         },
       }
     },

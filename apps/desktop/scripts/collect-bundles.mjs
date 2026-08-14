@@ -27,6 +27,7 @@
  * resolve workspace package.json files.
  */
 import { cpSync, existsSync, globSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -51,9 +52,14 @@ function parseDshClient(value) {
   return value
 }
 
-/** One roster row: the dsh.client metadata frozen next to the bundles. */
-function rosterRow(name, declaration) {
-  const row = { id: name }
+/** sha1 content hash shortened to 12 hex chars, the manifest's rev shortening. */
+function shortHash(content) {
+  return createHash('sha1').update(content).digest('hex').slice(0, 12)
+}
+
+/** One roster row: the dsh.client metadata plus the bundle rev, frozen at build time. */
+function rosterRow(name, declaration, bundleContent) {
+  const row = { id: name, rev: shortHash(bundleContent) }
   if (Array.isArray(declaration.inject)) row.inject = declaration.inject
   if (declaration.immediately === true) row.immediately = true
   return row
@@ -79,11 +85,12 @@ for (const manifestPath of globSync('packages/*/*/package.json', { cwd: repoRoot
   if (!existsSync(source)) {
     throw new Error(`collect-bundles: ${name} is a web client plugin but ${source} is missing — run build:lib first`)
   }
+  const bundleContent = readFileSync(source)
   const target = join(bundleRoot, name, 'client.js')
   mkdirSync(dirname(target), { recursive: true })
   cpSync(source, target)
   collected.add(name)
-  roster.push(rosterRow(name, declaration))
+  roster.push(rosterRow(name, declaration, bundleContent))
 }
 
 // Prune stale collected bundles: a package that stopped declaring a web client

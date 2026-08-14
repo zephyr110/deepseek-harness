@@ -53,7 +53,8 @@ function resolveBase(): string {
   return location?.origin !== undefined && location.origin !== 'null' ? location.origin : INTERNAL_BASE
 }
 
-function assertTarget(channel: string, endpoint: string): void {
+/** Shared target validation for every Connection RPC caller (web and IPC). */
+export function assertTarget(channel: string, endpoint: string): void {
   const segments = endpoint.split('/')
   if (!CHANNEL_PATTERN.test(channel)
     || segments.some(segment =>

@@ -28,11 +28,23 @@ export interface DesktopHost {
   ctx: unknown
   /** The in-process WHATWG fetch face over ctx.apiProxy. */
   fetch: { fetch: typeof fetch }
+  /**
+   * Tear down the plugin tree. The electron entry calls this on quit so
+   * in-flight projections and session writes flush instead of dying
+   * mid-write; idempotent (the cordis root fiber disposal is single-shot).
+   */
+  dispose(): Promise<void>
 }
 
 export async function startDesktopHost(): Promise<DesktopHost> {
   const ctx = await boot('dsh-desktop', fileURLToPath(CONFIG_URL), HOST_PATCHES)
   const apiProxy = (ctx as { apiProxy?: unknown }).apiProxy
   if (apiProxy === undefined) throw new Error('dsh-desktop: ctx.apiProxy missing after boot')
-  return { ctx, fetch: toFetchHandler(apiProxy as never) }
+  return {
+    ctx,
+    fetch: toFetchHandler(apiProxy as never),
+    dispose: async () => {
+      await (ctx as { fiber?: { dispose(): Promise<void> } }).fiber?.dispose()
+    },
+  }
 }

@@ -26,9 +26,11 @@ import type { WebBootEntry, WebBootGraph } from '@deepseek-ai/dsh-client-modules
 
 const defaultBundleRoot = fileURLToPath(new URL('../../dist/bundles', import.meta.url))
 
-/** One roster row as collect-bundles.mjs writes it (subset of dsh.client). */
+/** One roster row as collect-bundles.mjs writes it (dsh.client metadata plus the build-time bundle rev). */
 interface RosterRow {
   id: string
+  /** sha1 of the collected bundle, frozen at collect time — the manifest never re-reads bundles for revs. */
+  rev: string
   immediately?: boolean
   inject?: string[]
 }
@@ -51,15 +53,10 @@ function shortHash(input: string): string {
   return createHash('sha1').update(input).digest('hex').slice(0, 12)
 }
 
-/** Read one collected bundle, failing loud with the path that was missing. */
-function readBundle(bundlePath: string): string {
-  try {
-    return readFileSync(bundlePath, 'utf8')
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error)
-    throw new Error(`dsh-desktop: cannot read collected client bundle ${bundlePath}: ${detail}`, { cause: error })
-  }
-}
+// The bundle tree is frozen at build time and never changes during a run, so
+// the scan result is safe to memoize — the boot manifest and every
+// load-bundle resolution share one scan instead of re-globbing per call.
+const discoveryCache = new Map<string, Array<{ name: string }>>()
 
 /**
  * Scan the collected web client bundle directories under a bundle root.
@@ -68,11 +65,14 @@ function readBundle(bundlePath: string): string {
  * @returns discovered bundle package names.
  */
 export function discoverClientBundleDirs(root = defaultBundleRoot): Array<{ name: string }> {
+  const cached = discoveryCache.get(root)
+  if (cached !== undefined) return cached
   const dirs: Array<{ name: string }> = []
   for (const relPath of globSync(['*/*/client.js', '*/client.js'], { cwd: root }).sort()) {
     // dirs use forward slashes even on win32, so the suffix strip is safe.
     dirs.push({ name: relPath.slice(0, -'/client.js'.length) })
   }
+  discoveryCache.set(root, dirs)
   return dirs
 }
 
@@ -88,27 +88,34 @@ export function discoverClientPlugins(root = defaultBundleRoot): string[] {
 /**
  * Build the desktop boot graph: one wire entry per collected client bundle,
  * urls shaped `/plugins/<id>/client.js?rev=<rev>` exactly like the webserver
- * graph, with the roster's immediately/inject metadata on each row.
+ * graph, with the roster's frozen rev and immediately/inject metadata on each
+ * row — nothing here re-reads the bundles, so repeated calls (each window
+ * boot) cost one small roster read.
  * @param root - bundle root holding the collected web client bundles.
  * @returns the wire graph the renderer boots against.
+ * @throws when the root has no collected bundles — collect-bundles.mjs is a
+ * fixed build step, so an empty root is a packaging accident that must fail
+ * loud instead of booting a plugin-less shell.
  */
 export function buildBootManifest(root = defaultBundleRoot): WebBootGraph {
   const discovered = discoverClientBundleDirs(root)
-  const roster = discovered.length > 0 ? readRoster(root) : new Map<string, RosterRow>()
+  if (discovered.length === 0) {
+    throw new Error(`dsh-desktop: no collected client bundles under ${root} — run collect-bundles.mjs (part of the app build)`)
+  }
+  const roster = readRoster(root)
   const entries: WebBootEntry[] = []
   for (const { name } of discovered) {
-    const rev = shortHash(readBundle(join(root, name, 'client.js')))
     const row = roster.get(name)
     if (row === undefined) {
       throw new Error(`dsh-desktop: collected bundle "${name}" missing from roster.json under ${root}`)
     }
     // Same optional-field shape the webserver graph carries (graphRow):
-    // inject always (informational, possibly empty), immediately only when true.
+    // inject when the declaration has edges, immediately only when true.
     entries.push({
       id: name,
-      url: `/plugins/${name}/client.js?rev=${rev}`,
-      rev,
-      inject: row.inject ?? [],
+      url: `/plugins/${name}/client.js?rev=${row.rev}`,
+      rev: row.rev,
+      ...(row.inject !== undefined ? { inject: row.inject } : {}),
       ...(row.immediately === true ? { immediately: true } : {}),
     })
   }
@@ -126,9 +133,13 @@ export function buildBootManifest(root = defaultBundleRoot): WebBootGraph {
  * @throws when the id is not a discovered web client bundle package.
  */
 export function clientBundlePathOf(packageName: string, root = defaultBundleRoot): string {
+  const candidate = join(root, packageName, 'client.js')
+  // A scoped name nests under its scope (@deepseek-ai/<name>/client.js); the
+  // manifest's buildBootManifest discovery is the authoritative roster, so a
+  // path outside the scan cannot resolve even if it exists on disk.
   const discovered = discoverClientBundleDirs(root).some(entry => entry.name === packageName)
   if (!discovered) {
     throw new Error(`dsh-desktop: no collected web client bundle "${packageName}" under ${root}`)
   }
-  return join(root, packageName, 'client.js')
+  return candidate
 }

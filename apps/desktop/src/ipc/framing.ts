@@ -1,14 +1,13 @@
 /**
  * Wire framing for the IPC fetch bridge. Events are JSON strings carried by
- * `webContents.send('dsh:stream', ...)`. The variant interfaces are exported
- * individually so the preload sender side can construct events; parsing
- * narrows through the IpcStreamEvent union.
+ * `webContents.send('dsh:stream', ...)`. The event types come from the
+ * connection package — the same union the renderer-side consumer (IpcApiClient)
+ * narrows — so the wire contract has one definition instead of two copies that
+ * can drift apart. The variant interfaces are re-exported so the preload
+ * sender side can construct events; parsing narrows through the union.
  */
-
-export interface IpcChunkEvent { requestId: string; kind: 'chunk'; data: string }
-export interface IpcEndEvent { requestId: string; kind: 'end' }
-export interface IpcErrorEvent { requestId: string; kind: 'error'; message: string }
-export type IpcStreamEvent = IpcChunkEvent | IpcEndEvent | IpcErrorEvent
+import type { IpcStreamEvent } from '@deepseek-ai/dsh-client-connection/client'
+export type { IpcStreamChunkEvent, IpcStreamEndEvent, IpcStreamErrorEvent, IpcStreamEvent } from '@deepseek-ai/dsh-client-connection/client'
 
 export function serializeIpcStreamEvent(event: IpcStreamEvent): string {
   return JSON.stringify(event)

@@ -7,7 +7,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { HostDescription, IApiClient } from './api.ts'
 import { ConnectionController, type ConnectionConfig, type ConnectionSinks, type ConnectionState } from './connection.ts'
 import { FixtureApiClient } from './fixture.ts'
-import { IpcApiClient, type DesktopIpcTransport } from './ipc-api-client.ts'
+import { IpcApiClient, createIpcConnectionRpc, type DesktopIpcTransport } from './ipc-api-client.ts'
 import { WebApiClient } from './web-api-client.ts'
 import { createWebConnectionRpc } from './rpc.ts'
 import { isLoopbackHostname } from '../loopback-hostname.ts'
@@ -36,7 +36,15 @@ export {
   AbstractApiClient,
   transportError,
 } from './api.ts'
-export { IpcApiClient, type DesktopIpcTransport, type IpcStreamEvent } from './ipc-api-client.ts'
+export {
+  IpcApiClient,
+  createIpcConnectionRpc,
+  type DesktopIpcTransport,
+  type IpcStreamChunkEvent,
+  type IpcStreamEndEvent,
+  type IpcStreamErrorEvent,
+  type IpcStreamEvent,
+} from './ipc-api-client.ts'
 
 // Connection loop types are public through ConnectionHandle.start; the
 // controller remains package-internal.
@@ -96,7 +104,10 @@ export function apply(ctx: Context): void {
   const fixtureClient = fixture ? new FixtureApiClient() : undefined
   const desktopTransport = typeof window !== 'undefined' ? window.__DSH_DESKTOP__?.transport : undefined
   const api: IApiClient = fixtureClient ?? (desktopTransport !== undefined ? new IpcApiClient(desktopTransport) : new WebApiClient())
-  const rpc = fixtureClient?.rpc ?? createWebConnectionRpc()
+  // The desktop renderer has no HTTP origin (file://): the generic RPC channel
+  // rides the same IPC transport as the API client, with the identical
+  // envelope validation (serverResponseSchema + rpcId echo).
+  const rpc = fixtureClient?.rpc ?? (desktopTransport !== undefined ? createIpcConnectionRpc(desktopTransport) : createWebConnectionRpc())
   let started = false
   let description: HostDescription | undefined
   const descriptionListeners = new Set<() => void>()
@@ -113,7 +124,11 @@ export function apply(ctx: Context): void {
   }
   const handle: ConnectionHandle = {
     api,
-    isLoopback: pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
+    // The desktop host lives in the same process, so the desktop surface is
+    // always loopback — and file:// pages have an empty hostname that
+    // isLoopbackHostname would misread as non-loopback (which would push
+    // settings into the per-launch memory scope).
+    isLoopback: desktopTransport !== undefined || pageLocation === undefined || isLoopbackHostname(pageLocation.hostname),
     hostDescription: {
       getSnapshot: () => description,
       subscribe: (listener) => {

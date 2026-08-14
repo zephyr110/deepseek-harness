@@ -59,12 +59,17 @@ export function createIpcFetchHandler(fetchFn: IpcFetchFn): {
         stream.ended = true
         return { status: response.status, headers, streamId }
       }
+      // A stream-stateful decoder: chunk boundaries are arbitrary, and a
+      // per-chunk TextDecoder would corrupt any multibyte UTF-8 (CJK/emoji)
+      // sequence split across two chunks into U+FFFD. Node's TextDecoder
+      // carries the stream flag on decode(), not on the constructor.
+      const decoder = new TextDecoder('utf-8')
       void (async () => {
         try {
           for (;;) {
             const { done, value } = await reader.read()
             if (done) break
-            stream.subscriber({ requestId: request.requestId, kind: 'chunk', data: new TextDecoder().decode(value) })
+            stream.subscriber({ requestId: request.requestId, kind: 'chunk', data: decoder.decode(value, { stream: true }) })
           }
           stream.subscriber({ requestId: request.requestId, kind: 'end' })
         } catch (error) {
@@ -86,6 +91,12 @@ export function createIpcFetchHandler(fetchFn: IpcFetchFn): {
       stream.subscriber = (event) => {
         if (stream.ended && event.kind === 'chunk') return
         callback(event)
+        // Terminal events release the stream entry: without this, every
+        // dsh:fetch would leave an ActiveStream (plus its buffered array and
+        // the webContents closure) in the map for the life of the process.
+        if (event.kind === 'end' || event.kind === 'error') {
+          if (streams.get(streamId) === stream) streams.delete(streamId)
+        }
       }
       return () => {
         if (streams.get(streamId) === stream) streams.delete(streamId)
