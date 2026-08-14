@@ -35,6 +35,7 @@ function stubBridge(): StubBridge {
       },
       loadBundle: async () => { throw new Error('unused in transport tests') },
       bootManifest: async () => ({}),
+      booted: () => {},
     },
     requests,
     push(event) { listener?.(event) },

@@ -1,9 +1,10 @@
 /**
- * Desktop preload bridge: the contextIsolated window.dsh surface. Each
- * method is one ipcRenderer round trip to the main process — fetch requests
+ * Desktop preload bridge: the contextIsolated window.dsh surface. Most
+ * methods are one ipcRenderer round trip to the main process — fetch requests
  * over 'dsh:fetch' with the body streamed back over 'dsh:stream' events,
  * bundle reads over 'dsh:load-bundle', and the boot graph over
- * 'dsh:boot-manifest'. Nothing else is exposed to the page.
+ * 'dsh:boot-manifest'; `booted` is a one-way smoke signal (send, no reply).
+ * Nothing else is exposed to the page.
  */
 import { contextBridge, ipcRenderer } from 'electron'
 import type { IpcFetchRequest, IpcFetchResponse } from '../ipc/handler.ts'
@@ -14,6 +15,8 @@ export interface DesktopBridge {
   onStream(callback: (event: IpcStreamEvent) => void): () => void
   loadBundle(url: string): Promise<string>
   bootManifest(): Promise<unknown>
+  /** Smoke signal: the renderer reports the booted roster size after AppWebEntry.run() settles. */
+  booted(entries: number): void
 }
 
 const bridge: DesktopBridge = {
@@ -27,6 +30,7 @@ const bridge: DesktopBridge = {
   },
   loadBundle: url => ipcRenderer.invoke('dsh:load-bundle', url),
   bootManifest: () => ipcRenderer.invoke('dsh:boot-manifest'),
+  booted: entries => ipcRenderer.send('dsh:booted', entries),
 }
 
 contextBridge.exposeInMainWorld('dsh', bridge)

@@ -4,6 +4,7 @@
  * only supplies the desktop transport (window.dsh bridge) and bundle loading.
  */
 import { AppWebEntry } from '@deepseek-ai/dsh-client-web'
+import type { WebBootGraph } from '@deepseek-ai/dsh-client-modules/client'
 import type { DesktopBridge } from '../preload/index.ts'
 import type { DesktopIpcTransport } from '@deepseek-ai/dsh-client-connection/client'
 import { createDesktopTransport } from './transport.ts'
@@ -24,7 +25,7 @@ async function main(): Promise<void> {
 
   // The boot graph rides the same wire shape the webserver injects
   // ({ rev, entries }), so AppWebEntry's parseBootManifest accepts it.
-  const manifest = await bridge.bootManifest()
+  const manifest = await bridge.bootManifest() as WebBootGraph
   window.__DSH_BOOT__ = manifest
 
   // The connection client plugin reads __DSH_DESKTOP__.transport at
@@ -32,36 +33,36 @@ async function main(): Promise<void> {
   // bundle can materialize.
   window.__DSH_DESKTOP__ = { transport: createDesktopTransport(bridge) }
 
-  new AppWebEntry(el, {
+  const entry = new AppWebEntry(el, {
     loadBundle: async (url) => {
       const source = await bridge.loadBundle(url)
       await evaluateBundle(url, source)
     },
-  }).run()
+  })
+  await entry.run()
+  // Smoke signal: sent only after the boot settled — the packaged --smoke-test
+  // run waits for it, so a white or dead renderer (boot never reaching
+  // AppWebEntry.run, e.g. missing script assets) times out instead of passing
+  // on did-finish-load.
+  bridge.booted(manifest.entries.length)
 }
 
 /**
  * Evaluate a plugin bundle in the page context. Mirrors the default loader's
  * classic-script semantics (packages/client/modules/src/client/system.ts:
- * async external script) with an inline script — the bundle registers its
- * factory with window.__ModuleLoader__.load when it executes, and the load
- * event fires after the synchronous execution.
+ * async external script) with an inline script: the bundle registers its
+ * factory with window.__ModuleLoader__.load synchronously during the script's
+ * execution, which happens synchronously on append. Completion is therefore
+ * the append itself — modern Chromium fires the load event only for fetched
+ * scripts, not inline ones, so waiting on it would hang every bundle load.
+ * The loader's arrive() step still fails loud when the factory did not
+ * register (bundle syntax/runtime failure).
  */
-function evaluateBundle(url: string, source: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const el = document.createElement('script')
-    el.async = true
-    el.textContent = source
-    el.addEventListener('load', () => {
-      el.remove()
-      resolve()
-    }, { once: true })
-    el.addEventListener('error', () => {
-      el.remove()
-      reject(new Error(`desktop renderer: bundle ${url} failed to evaluate`))
-    }, { once: true })
-    document.head.append(el)
-  })
+function evaluateBundle(_url: string, source: string): Promise<void> {
+  const el = document.createElement('script')
+  el.textContent = source
+  document.head.append(el)
+  return Promise.resolve()
 }
 
 void main()

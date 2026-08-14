@@ -53,6 +53,9 @@ jobs:
       - name: Build libraries
         run: pnpm run build:lib
 
+      - name: Typecheck desktop app
+        run: pnpm exec tsc -p apps/desktop --noEmit
+
       - name: Build desktop app
         run: pnpm --filter @deepseek-ai/dsh-desktop run build
 
@@ -70,8 +73,7 @@ jobs:
         run: |
           case "${{ matrix.target }}" in
             macos-*)
-              APP="$(find apps/desktop/dist-installers -type d -name 'DeepSeek Harness.app' | head -n 1)"
-              "$APP/Contents/MacOS/DeepSeek Harness" --smoke-test
+              "apps/desktop/dist-installers/mac-arm64/DeepSeek Harness.app/Contents/MacOS/DeepSeek Harness" --smoke-test
               ;;
             windows-x64)
               "apps/desktop/dist-installers/win-unpacked/DeepSeek Harness.exe" --smoke-test

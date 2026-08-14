@@ -6,6 +6,10 @@ const src = (rel: string): string => fileURLToPath(new URL(rel, import.meta.url)
 
 export default defineConfig({
   root: 'src/renderer',
+  // Relative asset base: the renderer loads over file:// (win.loadFile),
+  // where a leading '/' would resolve to the filesystem root and 404 every
+  // /assets/… script, leaving the shell white.
+  base: './',
   plugins: [react()],
   resolve: {
     // Workspace client packages resolve to SOURCE, mirroring apps/web: their

@@ -8,6 +8,16 @@ import { registerIpcFetchBridge } from './ipc-bridge.ts'
 import { buildBootManifest, clientBundlePathOf } from './manifest.ts'
 import type { IpcFetchRequest, IpcFetchResponse } from '../ipc/handler.ts'
 
+// The bundle root the manifest scans: collect-bundles.mjs freezes one
+// <package>/client.js per web client plugin under dist/bundles, and
+// electron-builder packs that into the asar — the renderer roster and the
+// load-bundle resolver must both read this same root. Packaged runs resolve
+// from the asar root; dev runs from the app dir (the script runs as part of
+// the app build, so dist/bundles exists in both).
+const bundleRoot = app.isPackaged
+  ? join(app.getAppPath(), 'dist/bundles')
+  : fileURLToPath(new URL('../../dist/bundles', import.meta.url))
+
 async function createMainWindow(): Promise<BrowserWindow> {
   const win = new BrowserWindow({
     width: 1200,
@@ -23,8 +33,15 @@ async function createMainWindow(): Promise<BrowserWindow> {
   return win
 }
 
-/** --smoke-test: boot the host, open a window, then exit 0 (CI packaging smoke). */
+/**
+ * --smoke-test: boot the host, open a window, then exit 0 when the renderer
+ * reports it booted. did-finish-load fires for the HTML document even when the
+ * renderer is dead or white, so it is not a boot signal; the preload's
+ * 'dsh:booted' fires only after AppWebEntry.run() settles in main.tsx. A dead
+ * renderer (e.g. missing bundles) times out after SMOKE_TIMEOUT_MS and exits 1.
+ */
 const SMOKE = process.argv.includes('--smoke-test')
+const SMOKE_TIMEOUT_MS = 30_000
 
 void app.whenReady().then(async () => {
   // Persistence redirection: dshHomePath resolves $DSH_HOME first, so point
@@ -39,9 +56,8 @@ void app.whenReady().then(async () => {
     },
   )
   // dsh:load-bundle — map '/plugins/<id>/client.js?rev=…' (query ignored,
-  // id may carry a scope slash) to the built bundle under the plugin
-  // package's lib/client.js. Same prefix/suffix strip the webserver route
-  // applies.
+  // id may carry a scope slash) to the collected bundle under the bundle
+  // root. Same prefix/suffix strip the webserver route applies.
   ipcMain.handle('dsh:load-bundle', async (_event, url: string): Promise<string> => {
     const pathname = new URL(url, 'http://dsh.internal').pathname
     const prefix = '/plugins/'
@@ -50,17 +66,22 @@ void app.whenReady().then(async () => {
       throw new Error(`dsh-desktop: unsupported bundle url ${url}`)
     }
     const packageName = decodeURIComponent(pathname.slice(prefix.length, -suffix.length))
-    return readFile(clientBundlePathOf(packageName), 'utf8')
+    return readFile(clientBundlePathOf(packageName, bundleRoot), 'utf8')
   })
 
   // dsh:boot-manifest — the host graph's client roster, the same wire shape
-  // the webserver injects, produced from the built bundle directories.
-  ipcMain.handle('dsh:boot-manifest', async (): Promise<unknown> => buildBootManifest())
+  // the webserver injects, produced from the collected bundle directories.
+  ipcMain.handle('dsh:boot-manifest', async (): Promise<unknown> => buildBootManifest(bundleRoot))
 
-  const win = await createMainWindow()
+  await createMainWindow()
   if (SMOKE) {
-    win.webContents.once('did-finish-load', () => {
-      console.log('dsh-desktop smoke OK')
+    const timeout = setTimeout(() => {
+      console.error('dsh-desktop smoke FAILED: renderer booted signal not received within 30s')
+      app.exit(1)
+    }, SMOKE_TIMEOUT_MS)
+    ipcMain.on('dsh:booted', (_event, entries: number) => {
+      clearTimeout(timeout)
+      console.log(`dsh-desktop smoke OK (${entries} entries)`)
       void app.quit()
     })
   }
