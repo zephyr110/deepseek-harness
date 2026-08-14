@@ -632,6 +632,15 @@ importers:
         specifier: workspace:^
         version: link:../../packages/workspace/workspace
     devDependencies:
+      '@deepseek-ai/dsh-client-connection':
+        specifier: workspace:^
+        version: link:../../packages/client/connection
+      '@deepseek-ai/dsh-client-modules':
+        specifier: workspace:^
+        version: link:../../packages/client/modules
+      '@deepseek-ai/dsh-client-web':
+        specifier: workspace:^
+        version: link:../../packages/client/web
       '@types/react':
         specifier: ~18.3.1
         version: 18.3.31
